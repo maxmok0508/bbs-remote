@@ -499,9 +499,9 @@ impl<T: InvokeUiSession> Session<T> {
         }
         if value != "custom" {
             let custom_fps = *self.lc.read().unwrap().custom_fps.lock().unwrap();
-            if custom_fps.unwrap_or(30) != 30 {
-                // non custom quality use 30 fps
-                let msg = self.lc.write().unwrap().set_custom_fps(30, false);
+            if custom_fps.unwrap_or(60) != 60 {
+                // non custom quality use 60 fps
+                let msg = self.lc.write().unwrap().set_custom_fps(60, false);
                 self.send(Data::Message(msg));
             }
         }
