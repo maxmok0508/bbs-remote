@@ -1317,6 +1317,11 @@ fn get_api_server_(api: String, custom: String) -> String {
             return format!("http://{}", s);
         }
     }
+    if is_custom_client() {
+        if let Some(host) = config::RENDEZVOUS_SERVERS.first() {
+            return format!("http://{}:{}", host, config::RENDEZVOUS_PORT - 2);
+        }
+    }
     "https://admin.rustdesk.com".to_owned()
 }
 
@@ -2519,6 +2524,19 @@ pub fn rustdesk_interval(i: Interval) -> ThrottledInterval {
 }
 
 pub fn load_custom_client() {
+    if is_custom_client() {
+        let mut buildin = config::BUILTIN_SETTINGS.write().unwrap();
+        buildin.insert(keys::OPTION_HIDE_NETWORK_SETTINGS.to_owned(), "Y".to_owned());
+        buildin.insert(keys::OPTION_HIDE_SERVER_SETTINGS.to_owned(), "Y".to_owned());
+        buildin.insert(keys::OPTION_HIDE_PROXY_SETTINGS.to_owned(), "Y".to_owned());
+        buildin.insert(keys::OPTION_HIDE_WEBSOCKET_SETTINGS.to_owned(), "Y".to_owned());
+        buildin.insert(keys::OPTION_REMOVE_PRESET_PASSWORD_WARNING.to_owned(), "Y".to_owned());
+        drop(buildin);
+        config::DEFAULT_SETTINGS
+            .write()
+            .unwrap()
+            .insert(keys::OPTION_ENABLE_TRUSTED_DEVICES.to_owned(), "Y".to_owned());
+    }
     #[cfg(debug_assertions)]
     if let Ok(data) = std::fs::read_to_string("./custom.txt") {
         read_custom_client(data.trim());

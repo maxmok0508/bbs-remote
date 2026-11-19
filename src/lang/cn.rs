@@ -17,7 +17,7 @@ pub static ref T: std::collections::HashMap<&'static str, &'static str> =
         ("Transfer file", "传输文件"),
         ("Connect", "连接"),
         ("Recent sessions", "最近访问过"),
-        ("Address book", "地址簿"),
+        ("Address book", "我的设备"),
         ("Confirmation", "确认"),
         ("TCP tunneling", "TCP 隧道"),
         ("Remove", "删除"),

@@ -76,6 +76,17 @@ class _PeerTabPageState extends State<PeerTabPage>
     _loadLocalOptions();
   }
 
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final idx = gFFI.peerTabModel.currentTab;
+      if (idx >= 0 && idx < entries.length) {
+        entries[idx].load?.call(hint: false);
+      }
+    });
+  }
+
   void _loadLocalOptions() {
     final uiType = bind.getLocalFlutterOption(k: kOptionPeerCardUiType);
     if (uiType != '') {

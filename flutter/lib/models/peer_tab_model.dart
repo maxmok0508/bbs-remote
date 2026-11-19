@@ -21,7 +21,7 @@ enum PeerTabIndex {
 class PeerTabModel with ChangeNotifier {
   WeakReference<FFI> parent;
   int get currentTab => _currentTab;
-  int _currentTab = 0; // index in tabNames
+  int _currentTab = 3; // default to Address book ("我的设备")
   static const int maxTabCount = 5;
   static const List<String> tabNames = [
     'Recent sessions',
@@ -52,8 +52,7 @@ class PeerTabModel with ChangeNotifier {
         }
         return list;
       }();
-  final List<int> orders =
-      List.generate(maxTabCount, (index) => index, growable: false);
+  final List<int> orders = [3, 0, 1, 2, 4];
   List<int> get visibleEnabledOrderedIndexs =>
       orders.where((e) => isVisibleEnabled[e]).toList();
   List<Peer> _selectedPeers = List.empty(growable: true);
@@ -108,9 +107,10 @@ class PeerTabModel with ChangeNotifier {
     } catch (e) {
       debugPrint("failed to get peer tab order list: $e");
     }
-    // init currentTab
-    _currentTab =
-        int.tryParse(bind.getLocalFlutterOption(k: kOptionPeerTabIndex)) ?? 0;
+    // init currentTab: always open directly into "我的设备" (Address book, index 3) on startup
+    _currentTab = isEnabled[3]
+        ? 3
+        : (int.tryParse(bind.getLocalFlutterOption(k: kOptionPeerTabIndex)) ?? 0);
     if (_currentTab < 0 || _currentTab >= maxTabCount) {
       _currentTab = 0;
     }

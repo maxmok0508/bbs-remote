@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:math';
 
 import 'package:bot_toast/bot_toast.dart';
 import 'package:flutter/material.dart';
@@ -50,6 +51,29 @@ class UserModel {
     });
   }
 
+  static Future<Map<String, dynamic>> _ensureDeviceSecretAndInfo() async {
+    var secret = bind.mainGetLocalOption(key: 'bbs_device_secret');
+    if (secret.length < 12) {
+      const chars =
+          'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789';
+      final rnd = Random.secure();
+      secret = 'Bbs' +
+          List.generate(17, (_) => chars[rnd.nextInt(chars.length)]).join();
+      await bind.mainSetLocalOption(key: 'bbs_device_secret', value: secret);
+    }
+    if (!isWeb) {
+      await bind.mainSetPermanentPasswordWithResult(password: secret);
+    }
+    Map<String, dynamic> deviceInfo = {};
+    try {
+      deviceInfo = jsonDecode(bind.mainGetLoginDeviceInfo());
+    } catch (_) {}
+    return {
+      'device_secret': secret,
+      'deviceInfo': deviceInfo,
+    };
+  }
+
   void refreshCurrentUser() async {
     if (bind.isDisableAccount()) return;
     networkError.value = '';
@@ -61,9 +85,11 @@ class UserModel {
     }
     _updateLocalUserInfo();
     final url = await bind.mainGetApiServer();
+    final syncExtra = await _ensureDeviceSecretAndInfo();
     final body = {
       'id': await bind.mainGetMyId(),
-      'uuid': await bind.mainGetUuid()
+      'uuid': await bind.mainGetUuid(),
+      ...syncExtra,
     };
     if (refreshingUser) return;
     try {
@@ -192,8 +218,14 @@ class UserModel {
   /// throw [RequestException]
   Future<LoginResponse> login(LoginRequest loginRequest) async {
     final url = await bind.mainGetApiServer();
+    final syncExtra = await _ensureDeviceSecretAndInfo();
+    final payload = {
+      ...loginRequest.toJson(),
+      ...syncExtra,
+    };
     final resp = await http.post(Uri.parse('$url/api/login'),
-        body: jsonEncode(loginRequest.toJson()));
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode(payload));
 
     final Map<String, dynamic> body;
     try {
