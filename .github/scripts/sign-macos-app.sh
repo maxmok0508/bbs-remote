@@ -6,9 +6,11 @@ app_path=$1
 identity=$2
 entitlements=$3
 
-sign_args=(--force --options runtime --sign "$identity")
+sign_args=(--force --sign "$identity")
+app_sign_args=(--force --options runtime --sign "$identity")
 if [[ "$identity" != "-" ]]; then
-  sign_args+=(--timestamp)
+  sign_args+=(--options runtime --timestamp)
+  app_sign_args+=(--timestamp)
 fi
 
 frameworks_path="$app_path/Contents/Frameworks"
@@ -29,7 +31,7 @@ if [[ -f "$service_path" ]]; then
   codesign "${sign_args[@]}" "$service_path"
 fi
 
-codesign "${sign_args[@]}" --generate-entitlement-der \
+codesign "${app_sign_args[@]}" --generate-entitlement-der \
   --entitlements "$entitlements" "$app_path"
 codesign --verify --deep --strict --verbose=2 "$app_path"
 

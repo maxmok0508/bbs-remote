@@ -2,9 +2,6 @@ name: Build BBS-Remote macOS DMG
 
 on:
   workflow_dispatch:
-  push:
-    branches:
-      - main
 
 env:
   CARGO_EXPAND_VERSION: "1.0.95"
