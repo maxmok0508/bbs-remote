@@ -13,10 +13,8 @@ src/version.rs
 *exe
 *tgz
 cert.pfx
+/dist
 *.bak
-*png
-*svg
-*jpg
 sciter.dll
 **pdb
 src/bridge_generated.rs
