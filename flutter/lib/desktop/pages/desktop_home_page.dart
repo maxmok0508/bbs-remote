@@ -12,6 +12,7 @@ import 'package:flutter_hbb/consts.dart';
 import 'package:flutter_hbb/desktop/pages/connection_page.dart';
 import 'package:flutter_hbb/desktop/pages/desktop_setting_page.dart';
 import 'package:flutter_hbb/desktop/pages/desktop_tab_page.dart';
+import 'package:flutter_hbb/desktop/widgets/native_macos_bridge.dart';
 import 'package:flutter_hbb/desktop/widgets/uu_home_view.dart';
 import 'package:flutter_hbb/desktop/widgets/update_progress.dart';
 import 'package:flutter_hbb/models/platform_model.dart';
@@ -77,6 +78,11 @@ class _DesktopHomePageState extends State<DesktopHomePage>
   @override
   Widget build(BuildContext context) {
     super.build(context);
+    if (isMacOS) {
+      BbsNativeMacOSBridge.instance.attach(context);
+      BbsNativeMacOSBridge.instance.updateContext(context);
+      return const SizedBox.shrink();
+    }
     return _buildBlock(
       child: const BbsUuHomeView(),
     );

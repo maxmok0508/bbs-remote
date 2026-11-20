@@ -247,6 +247,7 @@ pub fn event_to_key_name(event: &rdev::Event) -> Option<String> {
 /// bindings). Call this once at startup and again whenever the config is
 /// written.
 pub fn reload_from_config() {
+    super::bbs_keymap::reload_from_config();
     let raw = hbb_common::config::LocalConfig::get_option(LOCAL_CONFIG_KEY);
     #[cfg(target_os = "linux")]
     let is_wayland = crate::platform::linux::current_is_wayland();
@@ -625,7 +626,7 @@ fn release_remote_non_modifiers(
 /// the chord (or an auto repeat) must still see them. It also sends through
 /// `send` instead of the globally current session.
 #[cfg(feature = "flutter")]
-fn release_remote_keys(
+pub(super) fn release_remote_keys(
     session_id: &hbb_common::SessionID,
     keyboard_mode: &str,
     peer: &str,

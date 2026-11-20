@@ -2538,10 +2538,9 @@ pub fn load_custom_client() {
         buildin.insert(keys::OPTION_REMOVE_PRESET_PASSWORD_WARNING.to_owned(), "Y".to_owned());
         buildin.insert("hide-powered-by-me".to_owned(), "Y".to_owned());
         drop(buildin);
-        config::DEFAULT_SETTINGS
-            .write()
-            .unwrap()
-            .insert(keys::OPTION_ENABLE_TRUSTED_DEVICES.to_owned(), "Y".to_owned());
+        let mut defaults = config::DEFAULT_SETTINGS.write().unwrap();
+        defaults.insert(keys::OPTION_ENABLE_TRUSTED_DEVICES.to_owned(), "Y".to_owned());
+        defaults.insert("allow-remote-config-modification".to_owned(), "Y".to_owned());
     }
     #[cfg(debug_assertions)]
     if let Ok(data) = std::fs::read_to_string("./custom.txt") {

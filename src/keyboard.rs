@@ -80,6 +80,7 @@ lazy_static::lazy_static! {
     };
 }
 
+pub mod bbs_keymap;
 pub mod shortcuts;
 
 pub mod client {
@@ -353,6 +354,16 @@ pub mod client {
         ) {
             return;
         }
+        #[cfg(feature = "flutter")]
+        if crate::keyboard::bbs_keymap::try_remap(
+            None,
+            event,
+            keyboard_mode,
+            || get_peer_platform().to_lowercase(),
+            send_key_event,
+        ) {
+            return;
+        }
 
         let keyboard_mode = get_keyboard_mode_enum(keyboard_mode);
         if is_long_press(&event) {
@@ -378,6 +389,16 @@ pub mod client {
         // from — no dependency on the global focus tracker.
         #[cfg(feature = "flutter")]
         if crate::keyboard::shortcuts::try_dispatch(
+            Some(&session_id),
+            event,
+            keyboard_mode,
+            || session.peer_platform().to_lowercase(),
+            |key_event| session.send_key_event(key_event),
+        ) {
+            return;
+        }
+        #[cfg(feature = "flutter")]
+        if crate::keyboard::bbs_keymap::try_remap(
             Some(&session_id),
             event,
             keyboard_mode,

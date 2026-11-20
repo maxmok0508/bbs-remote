@@ -1,6 +1,7 @@
 import Cocoa
 import AVFoundation
 import FlutterMacOS
+import SwiftUI
 import desktop_multi_window
 // import bitsdojo_window_macos
 
@@ -60,11 +61,67 @@ class MainFlutterWindow: NSWindow {
         _ = MainFlutterWindow.fullscreenObserver
         let flutterViewController = FlutterViewController.init()
         let windowFrame = self.frame
-        self.contentViewController = flutterViewController
-        self.setFrame(windowFrame, display: true)
+
+        let cliArgs = CommandLine.arguments
+        let isPureMainWindow = !cliArgs.contains("--cm")
+            && !cliArgs.contains("--install")
+            && !cliArgs.contains("--server")
+            && !cliArgs.contains("--service")
+            && !cliArgs.contains("multi_window")
+
+        if isPureMainWindow {
+            self.styleMask.insert(.fullSizeContentView)
+            self.titlebarAppearsTransparent = true
+            self.titleVisibility = .hidden
+            self.isOpaque = false
+            self.backgroundColor = .clear
+            self.hasShadow = true
+            self.minSize = NSSize(width: 960, height: 640)
+
+            let containerVC = NSViewController()
+            let rootView = NSView(frame: windowFrame)
+            rootView.wantsLayer = true
+            containerVC.view = rootView
+
+            // 1. Real macOS desktop wallpaper liquid refraction layer
+            let visualEffect = NSVisualEffectView(frame: rootView.bounds)
+            visualEffect.material = .underWindowBackground
+            visualEffect.blendingMode = .behindWindow
+            visualEffect.state = .active
+            visualEffect.autoresizingMask = [.width, .height]
+            rootView.addSubview(visualEffect)
+
+            // 2. Keep FlutterViewController alive in view hierarchy as a 1x1 sibling
+            // so gFFI, window_manager, and FlutterMultiWindowPlugin work natively
+            // without intercepting SwiftUI responder chain / TextField shortcuts.
+            containerVC.addChild(flutterViewController)
+            flutterViewController.view.frame = NSRect(x: 0, y: 0, width: 1, height: 1)
+            flutterViewController.view.alphaValue = 0.001
+            rootView.addSubview(flutterViewController.view)
+
+            // 3. Genuine Apple Native SwiftUI iOS 26/27 Liquid Glass UI
+            let hostingView = NSHostingView(rootView: BbsLiquidGlassRootView(store: BbsNativeStore.shared))
+            hostingView.frame = rootView.bounds
+            hostingView.autoresizingMask = [.width, .height]
+            rootView.addSubview(hostingView)
+
+            self.contentViewController = containerVC
+            let initialSize = NSSize(width: max(windowFrame.width, 1060), height: max(windowFrame.height, 700))
+            self.setFrame(NSRect(origin: windowFrame.origin, size: initialSize), display: true)
+            self.center()
+        } else {
+            self.contentViewController = flutterViewController
+            self.setFrame(windowFrame, display: true)
+        }
+
         // register self method handler
         let registrar = flutterViewController.registrar(forPlugin: "RustDeskPlugin")
         setMethodHandler(registrar: registrar)
+
+        if isPureMainWindow {
+            let nativeUiRegistrar = flutterViewController.registrar(forPlugin: "BbsNativeUIPlugin")
+            BbsNativeStore.shared.bindChannel(messenger: nativeUiRegistrar.messenger)
+        }
 
         RegisterGeneratedPlugins(registry: flutterViewController)
 

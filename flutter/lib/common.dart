@@ -3176,44 +3176,14 @@ Future<void> start_service(bool is_start) async {
 }
 
 Future<bool> canBeBlocked() async {
-  if (isWeb) {
-    // Web can only act as a controller, never as a controlled side,
-    // so it should never be blocked by a remote session.
-    return false;
-  }
-  // First check control permission
-  final controlPermission = await bind.mainGetCommon(
-      key: "is-remote-modify-enabled-by-control-permissions");
-  if (controlPermission == "true") {
-    return false;
-  } else if (controlPermission == "false") {
-    return true;
-  }
-
-  // Check local settings
-  var accessMode = await bind.mainGetOption(key: kOptionAccessMode);
-  var isCustomAccessMode = accessMode != 'full' && accessMode != 'view';
-  var option = option2bool(kOptionAllowRemoteConfigModification,
-      await bind.mainGetOption(key: kOptionAllowRemoteConfigModification));
-  return accessMode == 'view' || (isCustomAccessMode && !option);
+  // BBS-Remote: Always allow controlling the remote side's BBS-Remote window
+  // during an active remote desktop session.
+  return false;
 }
 
 // to-do: web not implemented
 Future<void> shouldBeBlocked(RxBool block, WhetherUseRemoteBlock? use) async {
-  if (use != null && !await use()) {
-    block.value = false;
-    return;
-  }
-  var time0 = DateTime.now().millisecondsSinceEpoch;
-  await bind.mainCheckMouseTime();
-  Timer(const Duration(milliseconds: 120), () async {
-    var d = time0 - await bind.mainGetMouseTime();
-    if (d < 120) {
-      block.value = true;
-    } else {
-      block.value = false;
-    }
-  });
+  block.value = false;
 }
 
 typedef WhetherUseRemoteBlock = Future<bool> Function();
@@ -3222,28 +3192,14 @@ Widget buildRemoteBlock(
     required RxBool block,
     required bool mask,
     WhetherUseRemoteBlock? use}) {
-  return Obx(() => MouseRegion(
-        onEnter: (_) async {
-          await shouldBeBlocked(block, use);
-        },
-        onExit: (event) => block.value = false,
-        child: Stack(children: [
-          // scope block tab
-          preventMouseKeyBuilder(child: child, block: block.value),
-          // mask block click, cm not block click and still use check_click_time to avoid block local click
-          if (mask)
-            Offstage(
-                offstage: !block.value,
-                child: Container(
-                  color: Colors.black.withOpacity(0.5),
-                )),
-        ]),
-      ));
+  if (block.value) {
+    block.value = false;
+  }
+  return child;
 }
 
 Widget preventMouseKeyBuilder({required Widget child, required bool block}) {
-  return ExcludeFocus(
-      excluding: block, child: AbsorbPointer(child: child, absorbing: block));
+  return child;
 }
 
 Widget unreadMessageCountBuilder(RxInt? count,

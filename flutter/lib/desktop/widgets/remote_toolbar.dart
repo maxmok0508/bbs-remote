@@ -23,6 +23,7 @@ import '../../models/platform_model.dart';
 import '../../common/shared_state.dart';
 import './popup_menu.dart';
 import './kb_layout_type_chooser.dart';
+import './bbs_key_mapping_view.dart';
 import 'package:flutter_hbb/utils/scale.dart';
 import 'package:flutter_hbb/common/widgets/custom_scale_base.dart';
 
@@ -2580,6 +2581,13 @@ class _KeyboardMenu extends StatelessWidget {
         color: _ToolbarTheme.blueColor,
         hoverColor: _ToolbarTheme.hoverBlueColor,
         menuChildrenGetter: (_) => [
+              MenuButton(
+                child: const Text('按键映射中心 (Mac / Win 540+ 键位)')
+                    .paddingOnly(left: 26.0),
+                onPressed: () => showBbsKeyMappingDialog(context, ffi: ffi),
+                ffi: ffi,
+              ),
+              Divider(),
               keyboardMode(),
               localKeyboardType(),
               inputSource(),

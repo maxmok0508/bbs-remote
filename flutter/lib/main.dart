@@ -110,9 +110,6 @@ Future<void> main(List<String> args) async {
     desktopType = DesktopType.main;
     await windowManager.ensureInitialized();
     windowManager.setPreventClose(true);
-    if (isMacOS) {
-      disableWindowMovable(kWindowId);
-    }
     runMainApp(true);
   }
 }
@@ -411,7 +408,7 @@ WindowOptions getHiddenTitleBarWindowOptions(
   return WindowOptions(
     size: size,
     center: center,
-    backgroundColor: (isMacOS && isMainWindow) ? null : Colors.transparent,
+    backgroundColor: Colors.transparent,
     skipTaskbar: false,
     titleBarStyle: defaultTitleBarStyle,
     alwaysOnTop: alwaysOnTop,

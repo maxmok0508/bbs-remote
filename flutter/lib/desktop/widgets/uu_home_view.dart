@@ -9,8 +9,10 @@ import 'package:flutter_hbb/common/formatter/id_formatter.dart';
 import 'package:flutter_hbb/common/hbbs/hbbs.dart';
 import 'package:flutter_hbb/common/widgets/dialog.dart';
 import 'package:flutter_hbb/consts.dart';
+import 'package:flutter_hbb/desktop/widgets/bbs_key_mapping_view.dart';
 import 'package:flutter_hbb/desktop/widgets/bbs_settings_view.dart';
 import 'package:flutter_hbb/models/ab_model.dart';
+import 'package:flutter_hbb/models/key_mapping_model.dart';
 import 'package:flutter_hbb/models/peer_model.dart';
 import 'package:flutter_hbb/models/platform_model.dart';
 import 'package:flutter_hbb/models/state_model.dart';
@@ -98,6 +100,7 @@ class _BbsUuHomeViewState extends State<BbsUuHomeView> {
   }
 
   Future<void> _initLocalInfoAndSync() async {
+    BbsKeyMappingCenter.instance.ensureInitialized();
     await _refreshLocalInfo();
     _refreshPermissions();
     if (gFFI.userModel.isLogin) {
@@ -659,11 +662,13 @@ rm -rf "$targetApp" && cp -R "$appBundleDir" "$targetApp" && xattr -cr "$targetA
                 Expanded(
                   child: _navIndex == 0
                       ? _buildMyDevicesPage(context, isDark)
-                      : (_navIndex == 1
-                          ? _buildPermissionsPage(context, isDark)
-                          : (_navIndex == 2
-                              ? const BbsSettingsView()
-                              : _buildManualAssistPage(context, isDark))),
+                      : (_navIndex == 4
+                          ? const BbsKeyMappingView()
+                          : (_navIndex == 1
+                              ? _buildPermissionsPage(context, isDark)
+                              : (_navIndex == 2
+                                  ? const BbsSettingsView()
+                                  : _buildManualAssistPage(context, isDark)))),
                 ),
               ],
             ),
@@ -919,6 +924,33 @@ rm -rf "$targetApp" && cp -R "$appBundleDir" "$targetApp" && xattr -cr "$targetA
                   : null,
             );
           }),
+          const SizedBox(height: 6),
+          _buildNavItem(
+            index: 4,
+            icon: Icons.keyboard_command_key_rounded,
+            label: '按键映射',
+            isDark: isDark,
+            trailing: Container(
+              padding:
+                  const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+              decoration: BoxDecoration(
+                color: _navIndex == 4
+                    ? Colors.white.withOpacity(0.22)
+                    : const Color(0xFF0EA5E9).withOpacity(0.15),
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Text(
+                '${BbsKeyMappingCenter.instance.totalCount}+',
+                style: TextStyle(
+                  fontSize: 10.5,
+                  fontWeight: FontWeight.w700,
+                  color: _navIndex == 4
+                      ? Colors.white
+                      : const Color(0xFF0EA5E9),
+                ),
+              ),
+            ),
+          ),
           const SizedBox(height: 6),
           if (isMacOS) ...[
             _buildNavItem(
