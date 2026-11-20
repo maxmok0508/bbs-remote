@@ -261,6 +261,7 @@ jobs:
 
       - name: Build BBS-Remote iOS IPA (unsigned for AltStore/SideStore/TestFlight)
         run: |
+          cp -f flutter/macos/Runner/bridge_generated.h flutter/ios/Runner/bridge_generated.h
           pushd flutter
           flutter pub get
           flutter build ios --release --no-codesign --build-name="${VERSION}" --build-number=153
