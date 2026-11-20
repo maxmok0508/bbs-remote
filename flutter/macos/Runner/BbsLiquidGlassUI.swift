@@ -45,30 +45,33 @@ struct BbsKeyRuleItem: Identifiable, Equatable {
 
 enum BbsNavTab: Int, CaseIterable, Identifiable {
     case devices = 0
-    case keymap = 1
-    case permissions = 2
-    case settings = 3
-    case assist = 4
+    case multiscreen = 1
+    case keymap = 2
+    case permissions = 3
+    case settings = 4
+    case assist = 5
 
     var id: Int { rawValue }
 
     var title: String {
         switch self {
         case .devices: return "我的设备"
+        case .multiscreen: return "多屏与隐私"
         case .keymap: return "按键映射"
         case .permissions: return "本机权限"
         case .settings: return "设置中心"
-        case .assist: return "临时协助"
+        case .assist: return "协助与端口"
         }
     }
 
     var symbol: String {
         switch self {
         case .devices: return "laptopcomputer.and.iphone"
+        case .multiscreen: return "sparkles.tv"
         case .keymap: return "keyboard.badge.ellipsis"
         case .permissions: return "checkmark.shield.fill"
         case .settings: return "slider.horizontal.3"
-        case .assist: return "paperplane.fill"
+        case .assist: return "point.3.connected.trianglepath.dotted"
         }
     }
 }
@@ -105,18 +108,23 @@ final class BbsNativeStore: ObservableObject {
     @Published var devices: [BbsDeviceItem] = []
 
     // Settings
-    @Published var imageQuality: String = "best"
-    @Published var customFps: Double = 120
-    @Published var customQuality: Double = 100
+    @Published var imageQuality: String = "custom"
+    @Published var customFps: Double = 144
+    @Published var customQuality: Double = 150
     @Published var codecPref: String = "auto"
-    @Published var viewStyle: String = "adaptive"
+    @Published var viewStyle: String = "original"
     @Published var hwCodec: Bool = true
     @Published var showQualityMonitor: Bool = false
     @Published var enableSound: Bool = true
     @Published var enableClipboard: Bool = true
     @Published var enableFileCopy: Bool = true
     @Published var enableTrueColor: Bool = false
+    @Published var enableHdr: Bool = false
     @Published var directLan: Bool = true
+    @Published var forceRelayDefault: Bool = false
+    @Published var multiScreenAllWindows: Bool = false
+    @Published var privacyStyle: String = "blackout"
+    @Published var privacyText: String = "正在远程安全办公中 · 请勿触碰设备"
     @Published var themeMode: String = "system"
 
     // Key Mappings (540+ Mac & Windows)
@@ -221,15 +229,34 @@ final class BbsNativeStore: ObservableObject {
         }
     }
 
-    func connectPeer(_ dev: BbsDeviceItem, fileTransfer: Bool = false) {
+    func connectPeer(
+        _ dev: BbsDeviceItem,
+        fileTransfer: Bool = false,
+        portForward: Bool = false,
+        forceRelay: Bool = false,
+        wirelessExt: Bool = false
+    ) {
         if dev.isSelf && !dev.hasPassword {
             showToast("这是当前正在使用的本机设备")
             return
         }
-        showToast(fileTransfer ? "正在打开远程文件传输..." : "正在建立高速远程连接...")
+        if portForward {
+            showToast("正在打开高速端口映射隧道...")
+        } else if fileTransfer {
+            showToast("正在打开高速文件传输通道...")
+        } else if wirelessExt {
+            showToast("正在启动 144Hz 无线扩展副屏模式...")
+        } else if forceRelay || forceRelayDefault {
+            showToast("正在通过 500Mbps 专线中转通道连接...")
+        } else {
+            showToast("正在建立多通道 P2P 高速直连...")
+        }
         invoke("connectPeer", args: [
             "id": dev.id,
-            "isFileTransfer": fileTransfer
+            "isFileTransfer": fileTransfer,
+            "isTcpTunneling": portForward,
+            "forceRelay": forceRelay,
+            "wirelessExt": wirelessExt
         ]) { [weak self] resp in
             if (resp["ok"] as? Bool) == false, let err = resp["error"] as? String {
                 self?.showToast(err)
@@ -308,7 +335,13 @@ final class BbsNativeStore: ObservableObject {
                 self.enableClipboard = (s["enableClipboard"] as? Bool) ?? true
                 self.enableFileCopy = (s["enableFileCopy"] as? Bool) ?? true
                 self.enableTrueColor = (s["enableTrueColor"] as? Bool) ?? false
+                self.enableHdr = (s["enableHdr"] as? Bool) ?? false
                 self.directLan = (s["directLan"] as? Bool) ?? true
+                self.forceRelayDefault = (s["forceRelayDefault"] as? Bool) ?? false
+                self.multiScreenAllWindows = (s["multiScreenAllWindows"] as? Bool) ?? false
+                self.privacyStyle = (s["privacyStyle"] as? String) ?? "blackout"
+                let pt = (s["privacyText"] as? String) ?? ""
+                if !pt.isEmpty { self.privacyText = pt }
                 self.themeMode = (s["themeMode"] as? String) ?? "system"
             }
 
@@ -831,6 +864,8 @@ struct BbsLiquidWorkspaceView: View {
                     switch store.selectedTab {
                     case .devices:
                         BbsMyDevicesPage(store: store)
+                    case .multiscreen:
+                        BbsMultiScreenPrivacyPage(store: store)
                     case .keymap:
                         BbsKeyMappingPage(store: store)
                     case .permissions:
@@ -1041,6 +1076,15 @@ struct BbsLiquidSidebar: View {
                         Capsule().fill(selected ? Color.white.opacity(0.22) : Color.cyan.opacity(0.15))
                     )
             }
+        case .multiscreen:
+            Text("满血")
+                .font(.system(size: 10, weight: .bold, design: .rounded))
+                .padding(.horizontal, 6.5)
+                .padding(.vertical, 2)
+                .foregroundStyle(selected ? Color.white : Color.indigo)
+                .background(
+                    Capsule().fill(selected ? Color.white.opacity(0.22) : Color.indigo.opacity(0.16))
+                )
         case .keymap:
             Text("\(store.keyTotalCount)+")
                 .font(.system(size: 10.5, weight: .bold, design: .rounded))
@@ -1268,7 +1312,10 @@ struct BbsMyDevicesPage: View {
                             BbsDeviceGlassCard(
                                 dev: dev,
                                 onConnect: { store.connectPeer(dev, fileTransfer: false) },
+                                onRelayConnect: { store.connectPeer(dev, forceRelay: true) },
+                                onWirelessExt: { store.connectPeer(dev, wirelessExt: true) },
                                 onTransfer: { store.connectPeer(dev, fileTransfer: true) },
+                                onPortForward: { store.connectPeer(dev, portForward: true) },
                                 onRename: {
                                     renameText = dev.alias.isEmpty ? dev.hostname : dev.alias
                                     renamingDevice = dev
@@ -1327,7 +1374,10 @@ struct BbsMyDevicesPage: View {
 struct BbsDeviceGlassCard: View {
     let dev: BbsDeviceItem
     let onConnect: () -> Void
+    let onRelayConnect: () -> Void
+    let onWirelessExt: () -> Void
     let onTransfer: () -> Void
+    let onPortForward: () -> Void
     let onRename: () -> Void
     let onDelete: () -> Void
 
@@ -1400,10 +1450,18 @@ struct BbsDeviceGlassCard: View {
                 Spacer()
 
                 Menu {
-                    Button("修改备注名称", action: onRename)
-                    Button("远程文件传输", action: onTransfer)
                     if !dev.isSelf {
+                        Button("手动切换 500Mbps 专线中转连接", action: onRelayConnect)
+                        Button("作为 144Hz 无线扩展副屏连接", action: onWirelessExt)
                         Divider()
+                    }
+                    Button("高速远程文件传输", action: onTransfer)
+                    if !dev.isSelf {
+                        Button("TCP 端口映射高速中转通道", action: onPortForward)
+                    }
+                    Divider()
+                    Button("修改备注名称", action: onRename)
+                    if !dev.isSelf {
                         Button("移除该设备", role: .destructive, action: onDelete)
                     }
                 } label: {
@@ -1418,19 +1476,21 @@ struct BbsDeviceGlassCard: View {
 
             Divider().opacity(0.22)
 
-            HStack(spacing: 10) {
+            HStack(spacing: 8) {
                 Text("ID: \(dev.formattedId.isEmpty ? dev.id : dev.formattedId)")
-                    .font(.system(size: 12, weight: .semibold, design: .monospaced))
+                    .font(.system(size: 11.5, weight: .semibold, design: .monospaced))
                     .foregroundStyle(.secondary)
+                    .lineLimit(1)
 
                 Spacer()
 
                 if !dev.isSelf {
+                    BbsLiquidActionButton(title: "端口映射", symbol: "point.3.connected.trianglepath.dotted", prominent: false, compact: true, action: onPortForward)
                     BbsLiquidActionButton(title: "传文件", symbol: "folder", prominent: false, compact: true, action: onTransfer)
                     BbsLiquidActionButton(title: "一键远程", symbol: "play.fill", prominent: true, compact: true, action: onConnect)
                 } else {
-                    Text("当前主控端")
-                        .font(.system(size: 12, weight: .medium))
+                    Text("当前主控端 · 多通道已解锁")
+                        .font(.system(size: 11.5, weight: .medium))
                         .foregroundStyle(.secondary)
                 }
             }
@@ -1980,16 +2040,16 @@ struct BbsSettingsPage: View {
                 }
                 .padding(.top, 6)
 
-                // High Refresh Rate Presets
+                // High Refresh Rate & 500Mbps Bitrate Presets
                 VStack(alignment: .leading, spacing: 12) {
-                    Text("画质与高刷预设档位")
+                    Text("4K 原画 · 高刷 · 500Mbps 满血预设")
                         .font(.system(size: 14.5, weight: .bold))
 
                     HStack(spacing: 10) {
-                        presetCard(mode: "best", fps: 120, title: "超清原画 · 120Hz", desc: "高码率色彩还原")
-                        presetCard(mode: "custom", fps: 240, title: "电竞极速 · 240Hz", desc: "超低操作跟手延迟")
-                        presetCard(mode: "custom", fps: 400, title: "极限超频 · 400Hz", desc: "解锁引擎最高帧率")
-                        presetCard(mode: "balanced", fps: 60, title: "均衡省流 · 60Hz", desc: "移动热点稳定流畅")
+                        presetCard(mode: "custom", fps: 144, mbps: 500, title: "4K 原画 · 144Hz", desc: "500Mbps 满血原画")
+                        presetCard(mode: "custom", fps: 240, mbps: 300, title: "电竞极速 · 240Hz", desc: "300Mbps 超低延迟")
+                        presetCard(mode: "custom", fps: 400, mbps: 500, title: "极限超频 · 400Hz", desc: "500Mbps 解锁极限")
+                        presetCard(mode: "custom", fps: 60, mbps: 30, title: "均衡省流 · 60Hz", desc: "30Mbps 移动流畅")
                     }
 
                     Divider().opacity(0.25)
@@ -1997,7 +2057,7 @@ struct BbsSettingsPage: View {
                     HStack {
                         Text("目标帧率上限：\(Int(store.customFps)) FPS")
                             .font(.system(size: 13, weight: .semibold))
-                            .frame(width: 170, alignment: .leading)
+                            .frame(width: 195, alignment: .leading)
                         Slider(value: $store.customFps, in: 30...400, step: 10) { editing in
                             if !editing {
                                 store.invoke("updateSetting", args: ["key": "customFps", "value": store.customFps])
@@ -2007,10 +2067,10 @@ struct BbsSettingsPage: View {
                     }
 
                     HStack {
-                        Text("画质码率增益：\(Int(store.customQuality))%")
+                        Text("自定义码率上限：\(Int(store.customQuality)) Mbps")
                             .font(.system(size: 13, weight: .semibold))
-                            .frame(width: 170, alignment: .leading)
-                        Slider(value: $store.customQuality, in: 20...500, step: 10) { editing in
+                            .frame(width: 195, alignment: .leading)
+                        Slider(value: $store.customQuality, in: 5...500, step: 5) { editing in
                             if !editing {
                                 store.invoke("updateSetting", args: ["key": "customQuality", "value": store.customQuality])
                             }
@@ -2069,17 +2129,21 @@ struct BbsSettingsPage: View {
 
                 // Feature Toggles
                 VStack(spacing: 12) {
-                    settingToggle("开启 P2P 打洞直连优先（UDP / IPv6 点对点低延迟通道）", key: "directLan", value: $store.directLan)
+                    settingToggle("开启 P2P 打洞直连优先（UDP / IPv6 点对点低延迟通道，多通道不限并发）", key: "directLan", value: $store.directLan)
                     Divider().opacity(0.2)
-                    settingToggle("连接后默认展开实时连接通道与 Mbps 速率监控面板", key: "showQualityMonitor", value: $store.showQualityMonitor)
+                    settingToggle("手动强制切换至 500Mbps 专线中转通道（适合企业严格防火墙或跨网丢包场景）", key: "forceRelayDefault", value: $store.forceRelayDefault)
+                    Divider().opacity(0.2)
+                    settingToggle("启用 4:4:4 无损真彩模式（专业设计修图与清晰代码文字零色度采样损失）", key: "enableTrueColor", value: $store.enableTrueColor)
+                    Divider().opacity(0.2)
+                    settingToggle("启用 HDR 高动态范围色彩增强（自动协同 4:4:4 真彩与宽色域对比度增强）", key: "enableHdr", value: $store.enableHdr)
+                    Divider().opacity(0.2)
+                    settingToggle("连接后默认展开实时连接通道（P2P/中转）与 Mbps 速率监控面板", key: "showQualityMonitor", value: $store.showQualityMonitor)
                     Divider().opacity(0.2)
                     settingToggle("启用 Apple Silicon VideoToolbox 硬件加速编解码", key: "hwCodec", value: $store.hwCodec)
                     Divider().opacity(0.2)
-                    settingToggle("启用 4:4:4 无损真彩模式（适合设计修图与代码文字阅读）", key: "enableTrueColor", value: $store.enableTrueColor)
-                    Divider().opacity(0.2)
                     settingToggle("同步传输远程电脑系统声音", key: "enableSound", value: $store.enableSound)
                     Divider().opacity(0.2)
-                    settingToggle("开启双向剪贴板与跨端文件复制粘贴", key: "enableClipboard", value: $store.enableClipboard)
+                    settingToggle("开启双向剪贴板与跨端高速文件复制粘贴", key: "enableClipboard", value: $store.enableClipboard)
                 }
                 .padding(18)
                 .liquidGlass(radius: 20)
@@ -2089,14 +2153,14 @@ struct BbsSettingsPage: View {
         .scrollContentBackground(.hidden)
     }
 
-    private func presetCard(mode: String, fps: Double, title: String, desc: String) -> some View {
-        let active = (mode == "custom" && Int(store.customFps) == Int(fps) && store.imageQuality == "custom")
-            || (mode != "custom" && store.imageQuality == mode)
+    private func presetCard(mode: String, fps: Double, mbps: Double, title: String, desc: String) -> some View {
+        let active = Int(store.customFps) == Int(fps) && Int(store.customQuality) == Int(mbps)
         return Button {
             store.imageQuality = mode
             store.customFps = fps
-            store.invoke("setQualityPreset", args: ["mode": mode, "fps": fps])
-            store.showToast("已切换至：\(title)")
+            store.customQuality = mbps
+            store.invoke("setQualityPreset", args: ["mode": mode, "fps": fps, "mbps": mbps])
+            store.showToast("已切换至：\(title) · \(Int(mbps))Mbps")
         } label: {
             VStack(alignment: .leading, spacing: 4) {
                 Text(title)
@@ -2138,20 +2202,21 @@ struct BbsSettingsPage: View {
     }
 }
 
-// MARK: - Page 5: Temporary Manual Assist
+// MARK: - Page 5: Temporary Manual Assist & High-Speed Port Forwarding
 
 struct BbsManualAssistPage: View {
     @ObservedObject var store: BbsNativeStore
     @State private var remoteId: String = ""
     @State private var remotePass: String = ""
+    @State private var manualForceRelay: Bool = false
     @State private var revealTempCode: Bool = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             VStack(alignment: .leading, spacing: 4) {
-                Text("临时远程协助")
+                Text("临时协助与高速端口映射")
                     .font(.system(size: 24, weight: .bold, design: .rounded))
-                Text("用于连接未绑定在您当前名下的外部临时设备，输入对方识别码即可发起协助")
+                Text("支持输入任意识别码发起远程控制、高速文件传输、TCP 端口映射隧道，并可手动指定专线中转")
                     .font(.system(size: 12.5))
                     .foregroundStyle(.secondary)
             }
@@ -2160,7 +2225,7 @@ struct BbsManualAssistPage: View {
             HStack(alignment: .top, spacing: 16) {
                 // Outgoing Manual Connect Card
                 VStack(alignment: .leading, spacing: 14) {
-                    Label("连接他人设备", systemImage: "paperplane.circle.fill")
+                    Label("发起连接 / 端口映射隧道", systemImage: "point.3.connected.trianglepath.dotted")
                         .font(.system(size: 16, weight: .bold))
 
                     TextField("输入对方 9 位设备识别码", text: $remoteId)
@@ -2183,23 +2248,37 @@ struct BbsManualAssistPage: View {
                                 .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(Color.white.opacity(0.24), lineWidth: 1))
                         )
 
-                    HStack(spacing: 10) {
-                        BbsLiquidActionButton(title: "发起远程控制", symbol: "play.fill", prominent: true) {
+                    Toggle("本次手动强制走 500Mbps 专线中转通道（Relay）", isOn: $manualForceRelay)
+                        .toggleStyle(.switch)
+                        .font(.system(size: 12.5, weight: .medium))
+
+                    HStack(spacing: 8) {
+                        BbsLiquidActionButton(title: "发起远控", symbol: "play.fill", prominent: true, compact: true) {
                             store.invoke("manualConnect", args: [
                                 "id": remoteId,
                                 "password": remotePass,
-                                "isFileTransfer": false
+                                "isFileTransfer": false,
+                                "forceRelay": manualForceRelay
                             ]) { resp in
                                 if (resp["ok"] as? Bool) == false, let err = resp["error"] as? String {
                                     store.showToast(err)
                                 }
                             }
                         }
-                        BbsLiquidActionButton(title: "仅传文件", symbol: "folder", prominent: false) {
+                        BbsLiquidActionButton(title: "传文件", symbol: "folder", prominent: false, compact: true) {
                             store.invoke("manualConnect", args: [
                                 "id": remoteId,
                                 "password": remotePass,
-                                "isFileTransfer": true
+                                "isFileTransfer": true,
+                                "forceRelay": manualForceRelay
+                            ])
+                        }
+                        BbsLiquidActionButton(title: "端口映射隧道", symbol: "network", prominent: false, compact: true) {
+                            store.invoke("manualConnect", args: [
+                                "id": remoteId,
+                                "password": remotePass,
+                                "isTcpTunneling": true,
+                                "forceRelay": manualForceRelay
                             ])
                         }
                     }
@@ -2271,5 +2350,185 @@ struct BbsManualAssistPage: View {
 
             Spacer()
         }
+    }
+}
+
+// MARK: - Page 6: Multi-Screen, Virtual/Wireless/Super Display & Privacy Screen
+
+struct BbsMultiScreenPrivacyPage: View {
+    @ObservedObject var store: BbsNativeStore
+
+    private var remotePeers: [BbsDeviceItem] {
+        store.devices.filter { !$0.isSelf }
+    }
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 14) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("多屏扩展与隐私防窥中心")
+                        .font(.system(size: 24, weight: .bold, design: .rounded))
+                    Text("全员满血解锁：多屏控多屏 · 无线副屏 · 虚拟屏 · 超级屏 · 黑屏防窥与自定义隐私屏保")
+                        .font(.system(size: 12.5))
+                        .foregroundStyle(.secondary)
+                }
+                .padding(.top, 6)
+
+                // Card 1: Multi-Screen / Virtual Display / Super Screen
+                VStack(alignment: .leading, spacing: 12) {
+                    Label("多屏控多屏 · 虚拟屏 · 超级屏引擎", systemImage: "rectangle.3.group.fill")
+                        .font(.system(size: 15.5, weight: .bold))
+                        .foregroundStyle(.cyan)
+
+                    HStack {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("多屏控多屏（所有远端显示器独立全屏窗口同开）")
+                                .font(.system(size: 13.5, weight: .semibold))
+                            Text("连接多显示器电脑时，自动将对方的多块屏幕分别映射到您本机的多个物理显示器上")
+                                .font(.system(size: 11.5))
+                                .foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        Toggle("", isOn: Binding(
+                            get: { store.multiScreenAllWindows },
+                            set: { val in
+                                store.multiScreenAllWindows = val
+                                store.invoke("updateSetting", args: ["key": "multiScreenAllWindows", "value": val])
+                                store.showToast(val ? "已开启多屏控多屏独立窗口映射" : "已切换为单窗口多屏切换")
+                            }
+                        ))
+                        .toggleStyle(.switch)
+                        .labelsHidden()
+                    }
+
+                    Divider().opacity(0.22)
+
+                    HStack(spacing: 10) {
+                        featurePill("多通道并发", "不限通道数 · 同时远控多台电脑", "square.stack.3d.up.fill")
+                        featurePill("虚拟屏扩展", "远控顶部「显示」菜单一键挂载虚拟屏", "display.2")
+                        featurePill("超级屏原画", "一键切 4K / 21:9 带鱼屏 / Retina", "arrow.up.left.and.arrow.down.right")
+                    }
+                }
+                .padding(18)
+                .liquidGlass(radius: 20)
+
+                // Card 2: Privacy Blackout & Custom Privacy Screensaver
+                VStack(alignment: .leading, spacing: 12) {
+                    Label("黑屏隐私屏 · 自定义隐私屏保（本机被控时防偷窥）", systemImage: "eye.slash.circle.fill")
+                        .font(.system(size: 15.5, weight: .bold))
+                        .foregroundStyle(.indigo)
+
+                    Text("当远程会话顶部「显示 → 隐私模式」开启时，本机物理显示器将立即隐藏真实桌面并锁定本地键鼠，而主控端依然正常流畅操控：")
+                        .font(.system(size: 12))
+                        .foregroundStyle(.secondary)
+
+                    Picker("", selection: Binding(
+                        get: { store.privacyStyle },
+                        set: { val in
+                            store.privacyStyle = val
+                            store.invoke("updateSetting", args: ["key": "privacyStyle", "value": val])
+                            store.showToast(val == "screensaver" ? "已切换为自定义隐私屏保模式" : "已切换为纯黑屏防窥模式")
+                        }
+                    )) {
+                        Text("黑屏隐私屏（物理显示器纯黑防窥）").tag("blackout")
+                        Text("自定义隐私屏保（物理屏显示专属维护锁屏，主控端正常看桌面）").tag("screensaver")
+                    }
+                    .pickerStyle(.segmented)
+                    .labelsHidden()
+
+                    if store.privacyStyle == "screensaver" {
+                        HStack(spacing: 10) {
+                            TextField("输入物理显示器上显示的隐私屏保文案...", text: $store.privacyText)
+                                .textFieldStyle(.plain)
+                                .font(.system(size: 13.5))
+                                .padding(.horizontal, 12)
+                                .padding(.vertical, 9)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                        .fill(Color.primary.opacity(0.05))
+                                        .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(Color.white.opacity(0.24), lineWidth: 1))
+                                )
+
+                            BbsLiquidActionButton(title: "保存屏保文案", symbol: "checkmark", compact: true) {
+                                store.invoke("updateSetting", args: ["key": "privacyText", "value": store.privacyText])
+                                store.showToast("已保存自定义隐私屏保文案")
+                            }
+                        }
+                    }
+                }
+                .padding(18)
+                .liquidGlass(radius: 20)
+
+                // Card 3: Wireless Secondary Screen & High-Speed Port Forward Quick Launcher
+                VStack(alignment: .leading, spacing: 12) {
+                    Label("无线副屏 & 端口映射高速中转快速通道", systemImage: "airplayvideo")
+                        .font(.system(size: 15.5, weight: .bold))
+                        .foregroundStyle(.cyan)
+
+                    if remotePeers.isEmpty {
+                        Text("在另一台 Mac 或 Windows 登录同一账号后，即可在此一键开启无线副屏或高速端口映射隧道")
+                            .font(.system(size: 12.5))
+                            .foregroundStyle(.secondary)
+                    } else {
+                        ForEach(remotePeers) { dev in
+                            HStack(spacing: 12) {
+                                Circle()
+                                    .fill(dev.online ? Color.green : Color.gray.opacity(0.5))
+                                    .frame(width: 8, height: 8)
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(dev.displayName)
+                                        .font(.system(size: 13.5, weight: .bold))
+                                    Text("\(dev.platform.isEmpty ? "Desktop" : dev.platform) · ID: \(dev.formattedId)")
+                                        .font(.system(size: 11.5))
+                                        .foregroundStyle(.secondary)
+                                }
+                                Spacer()
+                                BbsLiquidActionButton(title: "手动切中转", symbol: "arrow.triangle.branch", prominent: false, compact: true) {
+                                    store.connectPeer(dev, forceRelay: true)
+                                }
+                                BbsLiquidActionButton(title: "端口映射", symbol: "network", prominent: false, compact: true) {
+                                    store.connectPeer(dev, portForward: true)
+                                }
+                                BbsLiquidActionButton(title: "无线副屏", symbol: "display.2", prominent: true, compact: true) {
+                                    store.connectPeer(dev, wirelessExt: true)
+                                }
+                            }
+                            .padding(12)
+                            .background(
+                                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                                    .fill(Color.primary.opacity(0.04))
+                            )
+                        }
+                    }
+                }
+                .padding(18)
+                .liquidGlass(radius: 20)
+            }
+            .padding(.bottom, 12)
+        }
+        .scrollContentBackground(.hidden)
+    }
+
+    private func featurePill(_ title: String, _ desc: String, _ icon: String) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 6) {
+                Image(systemName: icon)
+                    .foregroundStyle(.cyan)
+                    .font(.system(size: 13, weight: .bold))
+                Text(title)
+                    .font(.system(size: 13, weight: .bold))
+            }
+            Text(desc)
+                .font(.system(size: 11))
+                .foregroundStyle(.secondary)
+                .lineLimit(2)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(12)
+        .background(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .fill(Color.primary.opacity(0.04))
+                .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(Color.white.opacity(0.18), lineWidth: 1))
+        )
     }
 }

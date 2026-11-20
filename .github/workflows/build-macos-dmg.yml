@@ -135,29 +135,16 @@ jobs:
       - name: Checkout source code
         uses: actions/checkout@v4
 
-      - name: Inject encrypted server configuration
+      - name: Verify encrypted server configuration secrets
         env:
-          CUSTOM_RENDEZVOUS_SERVER: ${{ secrets.RENDEZVOUS_SERVER }}
-          CUSTOM_RS_PUB_KEY: ${{ secrets.RS_PUB_KEY }}
+          BBS_RENDEZVOUS_SERVER: ${{ secrets.RENDEZVOUS_SERVER }}
+          BBS_RS_PUB_KEY: ${{ secrets.RS_PUB_KEY }}
         run: |
-          python3 - << 'PY'
-          import os, pathlib, sys
-          server = os.environ.get("CUSTOM_RENDEZVOUS_SERVER", "").strip()
-          pub_key = os.environ.get("CUSTOM_RS_PUB_KEY", "").strip()
-          if not server or not pub_key:
-              print("ERROR: Missing RENDEZVOUS_SERVER or RS_PUB_KEY in GitHub Secrets!", file=sys.stderr)
-              sys.exit(1)
-          cfg_path = pathlib.Path("libs/hbb_common/src/config.rs")
-          text = cfg_path.read_text(encoding="utf-8")
-          old_srv = 'pub const RENDEZVOUS_SERVERS: &[&str] = &["rs-ny.rustdesk.com"];'
-          old_key = 'pub const RS_PUB_KEY: &str = "OeVuKk5nlHiXp+APNn0Y3pC1Iwpwn44JGqrQCsWqmBw=";'
-          assert old_srv in text, "RENDEZVOUS_SERVERS placeholder not found in config.rs"
-          assert old_key in text, "RS_PUB_KEY placeholder not found in config.rs"
-          text = text.replace(old_srv, f'pub const RENDEZVOUS_SERVERS: &[&str] = &["{server}"];', 1)
-          text = text.replace(old_key, f'pub const RS_PUB_KEY: &str = "{pub_key}";', 1)
-          cfg_path.write_text(text, encoding="utf-8")
-          print("Successfully injected encrypted server and public key into config.rs.")
-          PY
+          if [ -z "$BBS_RENDEZVOUS_SERVER" ] || [ -z "$BBS_RS_PUB_KEY" ]; then
+            echo "ERROR: Missing RENDEZVOUS_SERVER or RS_PUB_KEY in GitHub Secrets!" >&2
+            exit 1
+          fi
+          echo "Verified encrypted server secrets for compile-time option_env! injection."
 
       - name: Install build runtime
         run: |
@@ -218,6 +205,9 @@ jobs:
 
       - name: Build BBS-Remote macOS app
         shell: bash
+        env:
+          BBS_RENDEZVOUS_SERVER: ${{ secrets.RENDEZVOUS_SERVER }}
+          BBS_RS_PUB_KEY: ${{ secrets.RS_PUB_KEY }}
         run: |
           export PATH="$(brew --prefix gnu-sed)/libexec/gnubin:$PATH"
           MIN_MACOS_VERSION="13.0"

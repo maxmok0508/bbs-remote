@@ -256,6 +256,10 @@ impl HwRamEncoder {
     }
 
     pub fn calc_bitrate(width: usize, height: usize, ratio: f32, h264: bool) -> u32 {
+        if ratio > crate::codec::DIRECT_MBPS_RATIO_OFFSET {
+            let mbps = (ratio - crate::codec::DIRECT_MBPS_RATIO_OFFSET).clamp(1.0, 500.0);
+            return (mbps * 1000.0).round() as u32;
+        }
         let base = base_bitrate(width as _, height as _) as f32 * ratio;
         let threshold = 2000.0;
         let decay_rate = 0.001; // 1000 * 0.001 = 1

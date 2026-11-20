@@ -110,19 +110,24 @@ class BbsNativeMacOSBridge {
     final q = bind.mainGetUserDefaultOption(key: kOptionImageQuality);
     final fpsRaw =
         double.tryParse(bind.mainGetUserDefaultOption(key: 'custom-fps')) ??
-            120.0;
+            144.0;
     final qualRaw = double.tryParse(
             bind.mainGetUserDefaultOption(key: 'custom_image_quality')) ??
-        100.0;
+        2150.0;
+    final double customMbps = qualRaw > 2000
+        ? (qualRaw - 2000.0).clamp(5.0, 500.0)
+        : (qualRaw * 0.5).clamp(5.0, 500.0);
     final codec = bind.mainGetUserDefaultOption(key: kOptionCodecPreference);
     final vs = bind.mainGetUserDefaultOption(key: kOptionViewStyle);
+    final privStyle = bind.mainGetLocalOption(key: 'bbs_privacy_style');
+    final privText = bind.mainGetLocalOption(key: 'bbs_privacy_text');
 
     return {
-      'imageQuality': q.isNotEmpty ? q : kRemoteImageQualityBest,
+      'imageQuality': q.isNotEmpty ? q : kRemoteImageQualityCustom,
       'customFps': fpsRaw.clamp(30.0, 400.0),
-      'customQuality': qualRaw.clamp(10.0, 500.0),
+      'customQuality': customMbps,
       'codecPref': codec.isNotEmpty ? codec : 'auto',
-      'viewStyle': vs.isNotEmpty ? vs : kRemoteViewStyleAdaptive,
+      'viewStyle': vs.isNotEmpty ? vs : kRemoteViewStyleOriginal,
       'hwCodec': bind.mainGetOptionSync(key: kOptionEnableHwcodec) != 'N',
       'showQualityMonitor':
           bind.mainGetUserDefaultOption(key: kOptionShowQualityMonitor) == 'Y',
@@ -134,7 +139,18 @@ class BbsNativeMacOSBridge {
           bind.mainGetUserDefaultOption(key: kOptionEnableFileCopyPaste) != 'N',
       'enableTrueColor':
           bind.mainGetUserDefaultOption(key: kOptionI444) == 'Y',
+      'enableHdr':
+          bind.mainGetUserDefaultOption(key: 'bbs_enable_hdr') == 'Y',
       'directLan': bind.mainGetLocalOption(key: kOptionEnableUdpPunch) != 'N',
+      'forceRelayDefault':
+          bind.mainGetLocalOption(key: 'bbs_force_relay') == 'Y',
+      'multiScreenAllWindows': bind.mainGetUserDefaultOption(
+              key: 'use-all-my-displays-for-the-remote-session') ==
+          'Y',
+      'privacyStyle': privStyle.isNotEmpty ? privStyle : 'blackout',
+      'privacyText': privText.isNotEmpty
+          ? privText
+          : '正在远程安全办公中 · 请勿触碰设备',
       'themeMode': MyTheme.getThemeModePreference().toShortString(),
     };
   }
@@ -302,6 +318,12 @@ class BbsNativeMacOSBridge {
       case 'connectPeer':
         final id = (args['id'] ?? '').toString().replaceAll(' ', '');
         final isFileTransfer = args['isFileTransfer'] == true;
+        final isTcpTunneling = args['isTcpTunneling'] == true;
+        final wirelessExt = args['wirelessExt'] == true;
+        final explicitRelay = args['forceRelay'] == true;
+        final globalForceRelay =
+            bind.mainGetLocalOption(key: 'bbs_force_relay') == 'Y';
+        final forceRelay = explicitRelay || globalForceRelay;
         if (id.isEmpty || _hostContext == null) {
           return {'ok': false, 'error': '无效设备 ID'};
         }
@@ -322,12 +344,22 @@ class BbsNativeMacOSBridge {
             await bind.mainSetPeerAlias(id: matched.id, alias: matched.alias);
           } catch (_) {}
         }
+        if (wirelessExt) {
+          await bind.mainSetUserDefaultOption(
+              key: kOptionViewStyle, value: kRemoteViewStyleAdaptive);
+          await bind.mainSetUserDefaultOption(
+              key: kOptionImageQuality, value: kRemoteImageQualityCustom);
+          await bind.mainSetUserDefaultOption(
+              key: 'custom-fps', value: '144');
+        }
         await connect(
           _hostContext!,
           id,
           password: pwd.isNotEmpty ? pwd : null,
           isSharedPassword: pwd.isNotEmpty,
           isFileTransfer: isFileTransfer,
+          isTcpTunneling: isTcpTunneling,
+          forceRelay: forceRelay,
         );
         return {'ok': true};
 
@@ -335,6 +367,9 @@ class BbsNativeMacOSBridge {
         final id = (args['id'] ?? '').toString().replaceAll(' ', '');
         final pwd = (args['password'] ?? '').toString();
         final isFileTransfer = args['isFileTransfer'] == true;
+        final isTcpTunneling = args['isTcpTunneling'] == true;
+        final forceRelay = args['forceRelay'] == true ||
+            bind.mainGetLocalOption(key: 'bbs_force_relay') == 'Y';
         if (id.isEmpty || _hostContext == null) {
           return {'ok': false, 'error': '请输入对方 9 位伙伴识别码'};
         }
@@ -343,6 +378,8 @@ class BbsNativeMacOSBridge {
           id,
           password: pwd.isNotEmpty ? pwd : null,
           isFileTransfer: isFileTransfer,
+          isTcpTunneling: isTcpTunneling,
+          forceRelay: forceRelay,
         );
         return {'ok': true};
 
@@ -437,13 +474,19 @@ class BbsNativeMacOSBridge {
         return {'ok': false};
 
       case 'setQualityPreset':
-        final mode = (args['mode'] ?? kRemoteImageQualityBest).toString();
+        final mode = (args['mode'] ?? kRemoteImageQualityCustom).toString();
         final fps = (args['fps'] as num?)?.toDouble();
+        final mbps = (args['mbps'] as num?)?.toDouble();
         await bind.mainSetUserDefaultOption(
             key: kOptionImageQuality, value: mode);
         if (fps != null) {
           await bind.mainSetUserDefaultOption(
               key: 'custom-fps', value: fps.round().toString());
+        }
+        if (mbps != null) {
+          final encoded = 2000 + mbps.round().clamp(5, 500);
+          await bind.mainSetUserDefaultOption(
+              key: 'custom_image_quality', value: encoded.toString());
         }
         await pushCoreState();
         return {'ok': true};
@@ -453,18 +496,20 @@ class BbsNativeMacOSBridge {
         final val = args['value'];
         switch (key) {
           case 'customFps':
-            final fps = ((val as num?)?.toDouble() ?? 120.0).round();
+            final fps = ((val as num?)?.toDouble() ?? 144.0).round();
             await bind.mainSetUserDefaultOption(
                 key: kOptionImageQuality, value: kRemoteImageQualityCustom);
             await bind.mainSetUserDefaultOption(
                 key: 'custom-fps', value: fps.toString());
             break;
           case 'customQuality':
-            final q = ((val as num?)?.toDouble() ?? 100.0).round();
+            final mbps =
+                ((val as num?)?.toDouble() ?? 150.0).round().clamp(5, 500);
+            final encoded = 2000 + mbps;
             await bind.mainSetUserDefaultOption(
                 key: kOptionImageQuality, value: kRemoteImageQualityCustom);
             await bind.mainSetUserDefaultOption(
-                key: 'custom_image_quality', value: q.toString());
+                key: 'custom_image_quality', value: encoded.toString());
             break;
           case 'codecPref':
             await bind.mainSetUserDefaultOption(
@@ -499,12 +544,38 @@ class BbsNativeMacOSBridge {
             await bind.mainSetUserDefaultOption(
                 key: kOptionI444, value: val == true ? 'Y' : 'N');
             break;
+          case 'enableHdr':
+            final on = val == true;
+            await bind.mainSetUserDefaultOption(
+                key: 'bbs_enable_hdr', value: on ? 'Y' : 'N');
+            if (on) {
+              await bind.mainSetUserDefaultOption(
+                  key: kOptionI444, value: 'Y');
+            }
+            break;
           case 'directLan':
             final flag = val == true ? 'Y' : 'N';
             await bind.mainSetLocalOption(
                 key: kOptionEnableUdpPunch, value: flag);
             await bind.mainSetLocalOption(
                 key: kOptionEnableIpv6Punch, value: flag);
+            break;
+          case 'forceRelayDefault':
+            await bind.mainSetLocalOption(
+                key: 'bbs_force_relay', value: val == true ? 'Y' : 'N');
+            break;
+          case 'multiScreenAllWindows':
+            await bind.mainSetUserDefaultOption(
+                key: 'use-all-my-displays-for-the-remote-session',
+                value: val == true ? 'Y' : 'N');
+            break;
+          case 'privacyStyle':
+            await bind.mainSetLocalOption(
+                key: 'bbs_privacy_style', value: val.toString());
+            break;
+          case 'privacyText':
+            await bind.mainSetLocalOption(
+                key: 'bbs_privacy_text', value: val.toString());
             break;
           case 'themeMode':
             final m = val.toString();

@@ -21,9 +21,11 @@ import '../../common.dart';
 import '../../models/model.dart';
 import '../../models/platform_model.dart';
 import '../../common/shared_state.dart';
+import 'package:flutter_hbb/utils/multi_window_manager.dart';
 import './popup_menu.dart';
 import './kb_layout_type_chooser.dart';
 import './bbs_key_mapping_view.dart';
+import '../pages/remote_page.dart' show bbsHdrVisualActive;
 import 'package:flutter_hbb/utils/scale.dart';
 import 'package:flutter_hbb/common/widgets/custom_scale_base.dart';
 
@@ -1759,7 +1761,115 @@ class _DisplayMenuState extends State<_DisplayMenu> {
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
     menuChildrenGetter(_IconSubmenuButtonState state) {
+      final isCurDirect =
+          ConnectionTypeState.find(id).direct.value == ConnectionType.strDirect;
       final menuChildren = <Widget>[
+        _SubmenuButton(
+          ffi: widget.ffi,
+          child: const Text('尊享旗舰画质 · 中转 · 超级屏'),
+          menuChildren: [
+            MenuButton(
+              ffi: ffi,
+              onPressed: () async {
+                await bind.sessionSetImageQuality(
+                    sessionId: ffi.sessionId, value: kRemoteImageQualityCustom);
+                await bind.sessionSetCustomImageQuality(
+                    sessionId: ffi.sessionId, value: 2500);
+                await bind.sessionSetCustomFps(
+                    sessionId: ffi.sessionId, fps: 144);
+                showToast('已开启 4K 原画 · 144Hz · 500Mbps 满血模式');
+              },
+              child: const Text('4K 原画 · 144Hz · 500Mbps 满血档')
+                  .paddingOnly(left: 26.0),
+            ),
+            MenuButton(
+              ffi: ffi,
+              onPressed: () async {
+                await bind.sessionSetImageQuality(
+                    sessionId: ffi.sessionId, value: kRemoteImageQualityCustom);
+                await bind.sessionSetCustomImageQuality(
+                    sessionId: ffi.sessionId, value: 2500);
+                await bind.sessionSetCustomFps(
+                    sessionId: ffi.sessionId, fps: 400);
+                showToast('已开启 400Hz · 500Mbps 电竞超频模式');
+              },
+              child: const Text('电竞超频 · 400Hz · 500Mbps 极限档')
+                  .paddingOnly(left: 26.0),
+            ),
+            CkbMenuButton(
+              value: bbsHdrVisualActive.value,
+              ffi: ffi,
+              onChanged: (bool? v) async {
+                final next = v ?? false;
+                bbsHdrVisualActive.value = next;
+                await bind.mainSetUserDefaultOption(
+                    key: 'bbs_enable_hdr', value: next ? 'Y' : 'N');
+                if (next) {
+                  await bind.sessionPeerOption(
+                      sessionId: ffi.sessionId,
+                      name: kOptionI444,
+                      value: 'Y');
+                  bind.sessionToggleOption(
+                      sessionId: ffi.sessionId, value: kOptionI444);
+                }
+                showToast(next ? '已开启 HDR 高动态色彩与 4:4:4 真彩增强' : '已关闭 HDR 增强');
+              },
+              child: const Text('HDR 高动态范围与真彩增强'),
+            ),
+            Divider(),
+            MenuButton(
+              ffi: ffi,
+              onPressed: () async {
+                final wantRelay = isCurDirect;
+                showToast(wantRelay
+                    ? '正在手动切换至 500Mbps 专线中转通道...'
+                    : '正在切换回 P2P 智能直连通道...');
+                await rustDeskWinManager.call(WindowType.Main, kWindowConnect, {
+                  'id': id,
+                  'forceRelay': wantRelay,
+                });
+              },
+              child: Text(isCurDirect
+                      ? '手动切换至专线中转通道 (Relay)'
+                      : '切换回 P2P 智能直连通道')
+                  .paddingOnly(left: 26.0),
+            ),
+            MenuButton(
+              ffi: ffi,
+              onPressed: () async {
+                await bind.sessionToggleVirtualDisplay(
+                    sessionId: ffi.sessionId, index: 1, on: true);
+                showToast('已向被控端请求挂载虚拟扩展屏');
+              },
+              child: const Text('一键挂载远端虚拟屏 (Virtual Display)')
+                  .paddingOnly(left: 26.0),
+            ),
+            Divider(),
+            for (final (label, w, h) in [
+              ('超级屏 · 4K UHD 原画 (3840×2160)', 3840, 2160),
+              ('超级屏 · 21:9 带鱼超宽屏 (3440×1440)', 3440, 1440),
+              ('超级屏 · Mac Retina (2880×1800)', 2880, 1800),
+              ('超级屏 · 2K QHD 高刷 (2560×1440)', 2560, 1440),
+              ('超级屏 · 1080P 电竞标准 (1920×1080)', 1920, 1080),
+            ])
+              MenuButton(
+                ffi: ffi,
+                onPressed: () async {
+                  if (pi.currentDisplay != kAllDisplayValue) {
+                    await bind.sessionChangeResolution(
+                      sessionId: ffi.sessionId,
+                      display: pi.currentDisplay,
+                      width: w,
+                      height: h,
+                    );
+                    showToast('已切换远端分辨率至 ${w}×$h');
+                  }
+                },
+                child: Text(label).paddingOnly(left: 26.0),
+              ),
+          ],
+        ),
+        Divider(),
         _screenAdjustor.adjustWindow(context),
         viewStyle(customPercent: _customPercent),
         scrollStyle(state, colorScheme),

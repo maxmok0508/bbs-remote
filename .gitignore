@@ -58,3 +58,8 @@ flutter/web/
 /third_party/libdrmtap/
 # Local git worktrees
 .worktrees/
+
+# Local build secrets & dist
+.env.local
+dist_run_*
+local_build_dmg.sh

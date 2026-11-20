@@ -893,6 +893,8 @@ pub fn allow_d3d_render() -> bool {
 pub const BR_BEST: f32 = 1.5;
 pub const BR_BALANCED: f32 = 0.67;
 pub const BR_SPEED: f32 = 0.5;
+/// Ratio offset used by BBS-Remote for direct 1..=500 Mbps custom bitrate targets.
+pub const DIRECT_MBPS_RATIO_OFFSET: f32 = 1000.0;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Quality {

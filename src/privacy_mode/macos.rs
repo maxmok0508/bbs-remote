@@ -1,7 +1,9 @@
 use super::{PrivacyMode, PrivacyModeState};
 use hbb_common::{anyhow::anyhow, ResultType};
+use std::ffi::CString;
 
 extern "C" {
+    fn MacConfigurePrivacyScreen(use_screensaver: bool, custom_text: *const std::os::raw::c_char);
     fn MacSetPrivacyMode(on: bool) -> bool;
 }
 
@@ -41,7 +43,19 @@ impl PrivacyMode for PrivacyModeImpl {
         if self.check_on_conn_id(conn_id)? {
             return Ok(true);
         }
-        let success = unsafe { MacSetPrivacyMode(true) };
+        let style = hbb_common::config::LocalConfig::get_option("bbs_privacy_style");
+        let use_screensaver = style == "screensaver";
+        let raw_text = hbb_common::config::LocalConfig::get_option("bbs_privacy_text");
+        let banner_text = if raw_text.trim().is_empty() {
+            "正在远程安全办公中 · 请勿触碰设备".to_owned()
+        } else {
+            raw_text
+        };
+        let c_text = CString::new(banner_text.replace('\0', "")).unwrap_or_default();
+        let success = unsafe {
+            MacConfigurePrivacyScreen(use_screensaver, c_text.as_ptr());
+            MacSetPrivacyMode(true)
+        };
         if !success {
             return Err(anyhow!("Failed to turn on privacy mode"));
         }

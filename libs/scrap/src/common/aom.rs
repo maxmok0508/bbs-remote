@@ -347,6 +347,10 @@ impl AomEncoder {
     }
 
     fn bitrate(width: u32, height: u32, ratio: f32) -> u32 {
+        if ratio > crate::codec::DIRECT_MBPS_RATIO_OFFSET {
+            let mbps = (ratio - crate::codec::DIRECT_MBPS_RATIO_OFFSET).clamp(1.0, 500.0);
+            return (mbps * 1000.0).round() as u32;
+        }
         let bitrate = base_bitrate(width, height) as f32;
         (bitrate * ratio) as u32
     }

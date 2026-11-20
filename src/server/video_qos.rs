@@ -55,7 +55,7 @@ pub const INIT_FPS: u32 = 30;
 const MIN_AUTO_FPS: u32 = 5;
 
 // Bitrate ratio constants for different quality levels
-const BR_MAX: f32 = 40.0; // 2000 * 2 / 100
+const BR_MAX: f32 = 250.0; // Unlocks high bitrate scaling
 const BR_MIN: f32 = 0.2;
 const BR_MIN_HIGH_RESOLUTION: f32 = 0.1; // For high resolution, BR_MIN is still too high, so we set a lower limit
 const MAX_BR_MULTIPLE: f32 = 1.0;
@@ -441,8 +441,14 @@ impl VideoQoS {
             } else if q == ImageQuality::Best.value() {
                 Quality::Best
             } else {
-                let b = ((q >> 8 & 0xFFF) * 2) as f32 / 100.0;
-                Quality::Custom(b.clamp(BR_MIN, BR_MAX))
+                let raw = (q >> 8) & 0xFFF;
+                if raw > 2000 {
+                    let mbps = (raw - 2000).clamp(1, 500) as f32;
+                    Quality::Custom(scrap::codec::DIRECT_MBPS_RATIO_OFFSET + mbps)
+                } else {
+                    let b = (raw * 2) as f32 / 100.0;
+                    Quality::Custom(b.clamp(BR_MIN, BR_MAX))
+                }
             }
         };
 
@@ -687,6 +693,9 @@ impl VideoQoS {
 
     // Lowest ratio the latest quality allows: keeps about 1Mbps at high resolutions.
     fn min_ratio(&self) -> f32 {
+        if self.ratio > scrap::codec::DIRECT_MBPS_RATIO_OFFSET {
+            return scrap::codec::DIRECT_MBPS_RATIO_OFFSET + 2.0;
+        }
         let current_bitrate = self.bitrate();
         let ratio_1mbps = if current_bitrate > 0 {
             Some((self.ratio * 1000.0 / current_bitrate as f32).max(BR_MIN_HIGH_RESOLUTION))
@@ -754,6 +763,23 @@ impl VideoQoS {
         let target_ratio = self.latest_quality().ratio();
         let current_ratio = self.ratio;
         let current_bitrate = self.bitrate();
+
+        if target_ratio > scrap::codec::DIRECT_MBPS_RATIO_OFFSET
+            && current_ratio > scrap::codec::DIRECT_MBPS_RATIO_OFFSET
+        {
+            let target_mbps = target_ratio - scrap::codec::DIRECT_MBPS_RATIO_OFFSET;
+            let cur_mbps = (current_ratio - scrap::codec::DIRECT_MBPS_RATIO_OFFSET).max(2.0);
+            let mut next_mbps = cur_mbps;
+            if let Some(factor) = reduction {
+                next_mbps = (cur_mbps * factor).max(2.0);
+            } else if dynamic_screen && max_delay < 100 {
+                next_mbps = (cur_mbps * 1.15 + 2.0).min(target_mbps);
+            }
+            self.ratio = scrap::codec::DIRECT_MBPS_RATIO_OFFSET + next_mbps.clamp(2.0, target_mbps);
+            self.reset_send_counters();
+            self.adjust_ratio_instant = self.now();
+            return;
+        }
 
         // Calculate ratio for adding 150kbps bandwidth
         let ratio_add_150kbps = if current_bitrate > 0 {

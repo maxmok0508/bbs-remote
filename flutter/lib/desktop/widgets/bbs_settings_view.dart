@@ -83,8 +83,10 @@ class _BbsSettingsViewState extends State<BbsSettingsView> {
 
     final qualRaw = double.tryParse(
             bind.mainGetUserDefaultOption(key: 'custom_image_quality')) ??
-        kDefaultQuality;
-    _customQuality = qualRaw.clamp(10.0, 500.0);
+        2150.0;
+    _customQuality = qualRaw > 2000
+        ? (qualRaw - 2000.0).clamp(5.0, 500.0)
+        : (qualRaw * 0.5).clamp(5.0, 500.0);
 
     final c = bind.mainGetUserDefaultOption(key: kOptionCodecPreference);
     _codecPref = c.isNotEmpty ? c : 'auto';
@@ -318,21 +320,21 @@ class _BbsSettingsViewState extends State<BbsSettingsView> {
               ),
               Row(
                 children: [
-                  const Text('画面码率倍率',
+                  const Text('自定义码率上限',
                       style: TextStyle(
                           fontSize: 13.5, fontWeight: FontWeight.w600)),
                   const SizedBox(width: 10),
                   Text(
-                    '${_customQuality.round()}% (拉高可提升高动态清晰度)',
+                    '${_customQuality.round()} Mbps (最高解锁 500Mbps 原画直出)',
                     style: TextStyle(fontSize: 12, color: subColor),
                   ),
                 ],
               ),
               Slider(
-                value: _customQuality,
-                min: 10.0,
+                value: _customQuality.clamp(5.0, 500.0),
+                min: 5.0,
                 max: 500.0,
-                divisions: 49,
+                divisions: 99,
                 onChanged: (v) {
                   setState(() {
                     _customQuality = v;
@@ -343,8 +345,9 @@ class _BbsSettingsViewState extends State<BbsSettingsView> {
                   await bind.mainSetUserDefaultOption(
                       key: kOptionImageQuality,
                       value: kRemoteImageQualityCustom);
+                  final encoded = 2000 + v.round().clamp(5, 500);
                   await bind.mainSetUserDefaultOption(
-                      key: 'custom_image_quality', value: v.round().toString());
+                      key: 'custom_image_quality', value: encoded.toString());
                 },
               ),
               const Divider(height: 22),

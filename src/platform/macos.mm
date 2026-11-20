@@ -772,6 +772,114 @@ static void TeardownEventTapOnMainThread() {
 
 // Internal function to turn off privacy mode without acquiring the mutex
 // Must be called while holding g_privacyModeMutex
+static bool g_bbsUseScreensaver = false;
+static std::string g_bbsPrivacyText = "正在远程安全办公中 · 请勿触碰设备";
+static NSMutableArray<NSWindow*>* g_bbsPrivacyWindows = nil;
+
+extern "C" void MacConfigurePrivacyScreen(bool useScreensaver, const char* customText) {
+    std::lock_guard<std::mutex> lock(g_privacyModeMutex);
+    g_bbsUseScreensaver = useScreensaver;
+    if (customText != NULL && strlen(customText) > 0) {
+        g_bbsPrivacyText = std::string(customText);
+    } else {
+        g_bbsPrivacyText = "正在远程安全办公中 · 请勿触碰设备";
+    }
+}
+
+static void ShowBbsPrivacyShieldWindows(bool screensaverMode, const std::string& messageText) {
+    NSString* nsMsg = [NSString stringWithUTF8String:messageText.c_str()] ?: @"正在远程安全办公中 · 请勿触碰设备";
+    void (^block)(void) = ^{
+        if (!g_bbsPrivacyWindows) {
+            g_bbsPrivacyWindows = [[NSMutableArray alloc] init];
+        }
+        for (NSWindow* w in g_bbsPrivacyWindows) {
+            [w orderOut:nil];
+            [w close];
+        }
+        [g_bbsPrivacyWindows removeAllObjects];
+
+        for (NSScreen* screen in [NSScreen screens]) {
+            NSRect frame = screen.frame;
+            NSWindow* win = [[NSWindow alloc] initWithContentRect:frame
+                                                        styleMask:NSWindowStyleMaskBorderless
+                                                          backing:NSBackingStoreBuffered
+                                                            defer:NO];
+            [win setReleasedWhenClosed:NO];
+            [win setLevel:NSScreenSaverWindowLevel];
+            [win setOpaque:YES];
+            [win setBackgroundColor:[NSColor colorWithCalibratedRed:0.03 green:0.05 blue:0.10 alpha:1.0]];
+            [win setIgnoresMouseEvents:NO];
+            // NSWindowSharingNone excludes this shield window from ScreenCaptureKit / CGDisplayStream
+            // so the remote controller sees the real live desktop underneath!
+            [win setSharingType:NSWindowSharingNone];
+            [win setCollectionBehavior:(NSWindowCollectionBehaviorCanJoinAllSpaces |
+                                        NSWindowCollectionBehaviorFullScreenAuxiliary |
+                                        NSWindowCollectionBehaviorStationary)];
+
+            NSView* content = [[NSView alloc] initWithFrame:NSMakeRect(0, 0, frame.size.width, frame.size.height)];
+            [content setWantsLayer:YES];
+            content.layer.backgroundColor = screensaverMode
+                ? [[NSColor colorWithCalibratedRed:0.04 green:0.07 blue:0.14 alpha:1.0] CGColor]
+                : [[NSColor blackColor] CGColor];
+
+            if (screensaverMode) {
+                CGFloat boxW = MIN(680.0, frame.size.width - 80.0);
+                CGFloat boxH = 190.0;
+                NSView* card = [[NSView alloc] initWithFrame:NSMakeRect((frame.size.width - boxW) * 0.5,
+                                                                        (frame.size.height - boxH) * 0.5,
+                                                                        boxW, boxH)];
+                [card setWantsLayer:YES];
+                card.layer.cornerRadius = 26.0;
+                card.layer.backgroundColor = [[NSColor colorWithCalibratedWhite:1.0 alpha:0.07] CGColor];
+                card.layer.borderWidth = 1.0;
+                card.layer.borderColor = [[NSColor colorWithCalibratedRed:0.22 green:0.74 blue:0.97 alpha:0.45] CGColor];
+
+                NSTextField* titleLbl = [NSTextField labelWithString:@"BBS-Remote · 隐私屏保防窥保护中"];
+                [titleLbl setFont:[NSFont boldSystemFontOfSize:24.0]];
+                [titleLbl setTextColor:[NSColor colorWithCalibratedRed:0.22 green:0.78 blue:0.99 alpha:1.0]];
+                [titleLbl setAlignment:NSTextAlignmentCenter];
+                [titleLbl setFrame:NSMakeRect(24.0, 108.0, boxW - 48.0, 36.0)];
+                [card addSubview:titleLbl];
+
+                NSTextField* subLbl = [NSTextField wrappingLabelWithString:nsMsg];
+                [subLbl setFont:[NSFont systemFontOfSize:17.0 weight:NSFontWeightMedium]];
+                [subLbl setTextColor:[NSColor colorWithCalibratedWhite:0.92 alpha:1.0]];
+                [subLbl setAlignment:NSTextAlignmentCenter];
+                [subLbl setFrame:NSMakeRect(28.0, 42.0, boxW - 56.0, 54.0)];
+                [card addSubview:subLbl];
+
+                [content addSubview:card];
+            }
+
+            [win setContentView:content];
+            [win orderFrontRegardless];
+            [g_bbsPrivacyWindows addObject:win];
+        }
+    };
+    if ([NSThread isMainThread]) {
+        block();
+    } else {
+        dispatch_sync(dispatch_get_main_queue(), block);
+    }
+}
+
+static void HideBbsPrivacyShieldWindows() {
+    void (^block)(void) = ^{
+        if (g_bbsPrivacyWindows) {
+            for (NSWindow* w in g_bbsPrivacyWindows) {
+                [w orderOut:nil];
+                [w close];
+            }
+            [g_bbsPrivacyWindows removeAllObjects];
+        }
+    };
+    if ([NSThread isMainThread]) {
+        block();
+    } else {
+        dispatch_sync(dispatch_get_main_queue(), block);
+    }
+}
+
 static bool TurnOffPrivacyModeInternal() {
     if (!g_privacyModeActive) {
         return true;
@@ -782,6 +890,9 @@ static bool TurnOffPrivacyModeInternal() {
     
     // 2. Input - restore (tear down EventTap on main thread)
     TeardownEventTapOnMainThread();
+
+    // 2b. Hide custom privacy screensaver / blackout shield windows
+    HideBbsPrivacyShieldWindows();
 
     // 3. Gamma - restore using UUID to find current DisplayID
     bool restoreSuccess = RestoreAllGammas();
@@ -832,6 +943,13 @@ extern "C" bool MacSetPrivacyMode(bool on) {
 
         // 2. Register display reconfiguration callback to handle hot-plug events
         CGDisplayRegisterReconfigurationCallback(DisplayReconfigurationCallback, NULL);
+
+        // 2b. Mount NSWindowSharingNone shield windows (Custom Screensaver or Blackout)
+        ShowBbsPrivacyShieldWindows(g_bbsUseScreensaver, g_bbsPrivacyText);
+        if (g_bbsUseScreensaver) {
+            g_privacyModeActive = true;
+            return true;
+        }
 
         // 3. Gamma Blackout
         uint32_t count = 0;
@@ -903,7 +1021,8 @@ extern "C" bool MacSetPrivacyMode(bool on) {
         }
         
         // Return false if any display failed to blackout - privacy mode requires ALL displays to be blacked out
-        if (blackoutAttemptCount > 0 && blackoutSuccessCount < blackoutAttemptCount) {
+        if (blackoutAttemptCount > 0 && blackoutSuccessCount < blackoutAttemptCount &&
+            (g_bbsPrivacyWindows == nil || [g_bbsPrivacyWindows count] == 0)) {
             NSLog(@"MacSetPrivacyMode: Failed to blackout all displays (%u/%u succeeded)", blackoutSuccessCount, blackoutAttemptCount);
             // Clean up: unregister callback and disable event tap since we're failing
             CGDisplayRemoveReconfigurationCallback(DisplayReconfigurationCallback, NULL);

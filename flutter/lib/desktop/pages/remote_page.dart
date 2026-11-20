@@ -29,6 +29,7 @@ import 'package:flutter_hbb/native/custom_cursor.dart'
     if (dart.library.html) 'package:flutter_hbb/web/custom_cursor.dart';
 
 final SimpleWrapper<bool> _firstEnterImage = SimpleWrapper(false);
+final RxBool bbsHdrVisualActive = false.obs;
 
 // Used to skip session close if "move to new window" is clicked.
 final Map<String, bool> closeSessionOnDispose = {};
@@ -50,6 +51,8 @@ class RemotePage extends StatefulWidget {
     this.isSharedPassword,
   }) : super(key: key) {
     initSharedStates(id);
+    bbsHdrVisualActive.value =
+        bind.mainGetUserDefaultOption(key: 'bbs_enable_hdr') == 'Y';
   }
 
   final String id;
@@ -977,7 +980,7 @@ class _RemotePageState extends State<RemotePage>
                   ? Container(color: Colors.transparent)
                   : Obx(() {
                       _ffi.textureModel.updateCurrentDisplay(peerDisplay.value);
-                      return ImagePaint(
+                      final paintWidget = ImagePaint(
                         id: widget.id,
                         zoomCursor: _zoomCursor,
                         cursorOverImage: _cursorOverImage,
@@ -987,6 +990,18 @@ class _RemotePageState extends State<RemotePage>
                             _buildRawTouchAndPointerRegion(
                                 child, enterView, leaveView),
                         ffi: _ffi,
+                      );
+                      if (!bbsHdrVisualActive.value) {
+                        return paintWidget;
+                      }
+                      return ColorFiltered(
+                        colorFilter: const ColorFilter.matrix(<double>[
+                          1.12, -0.04, -0.04, 0, -4,
+                          -0.04, 1.12, -0.04, 0, -4,
+                          -0.04, -0.04, 1.14, 0, -4,
+                          0, 0, 0, 1, 0,
+                        ]),
+                        child: paintWidget,
                       );
                     }),
             );
