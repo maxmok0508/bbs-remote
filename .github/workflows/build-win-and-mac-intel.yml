@@ -147,7 +147,7 @@ jobs:
       - name: Install vcpkg dependencies
         shell: pwsh
         run: |
-          & "$env:VCPKG_ROOT\vcpkg.exe" install --triplet=x64-windows-static --x-install-root="$env:VCPKG_ROOT\installed"
+          & "$env:VCPKG_ROOT\vcpkg.exe" install --triplet=x64-windows-static --host-triplet=x64-windows-static --x-install-root="$env:VCPKG_ROOT\installed"
 
       - name: Build BBS-Remote Windows x64
         shell: pwsh
