@@ -103,7 +103,8 @@ class _BbsSettingsViewState extends State<BbsSettingsView> {
         bind.mainGetUserDefaultOption(key: kOptionEnableFileCopyPaste) != 'N';
     _enableTrueColor =
         bind.mainGetUserDefaultOption(key: kOptionI444) == 'Y';
-    _directLan = bind.mainGetOptionSync(key: kOptionDirectServer) != 'N';
+    final udpOpt = bind.mainGetLocalOption(key: kOptionEnableUdpPunch);
+    _directLan = udpOpt != 'N';
     _themeMode = MyTheme.getThemeModePreference().toShortString();
   }
 
@@ -514,14 +515,21 @@ class _BbsSettingsViewState extends State<BbsSettingsView> {
                 },
               ),
               _buildSwitchRow(
-                title: '同网络 P2P 局域网毫秒级直连',
-                subtitle: '两台设备在同一局域网或可直连时自动走内网/P2P 超高速通道',
+                title: '优先 P2P 点对点打洞直连（UDP / TCP / IPv6）',
+                subtitle: '开启后优先在两台电脑间建立 P2P 直连（零服务器中转带宽限制），打洞失败时自动回退 200Mbps 专线中转',
                 value: _directLan,
                 subColor: subColor,
                 onChanged: (v) async {
                   setState(() => _directLan = v);
+                  final val = v ? 'Y' : 'N';
+                  await bind.mainSetLocalOption(
+                      key: kOptionEnableUdpPunch, value: val);
+                  await bind.mainSetLocalOption(
+                      key: kOptionEnableIpv6Punch, value: val);
+                  await bind.mainSetLocalOption(
+                      key: kOptionEnableTcpPunch, value: val);
                   await bind.mainSetOption(
-                      key: kOptionDirectServer, value: v ? 'Y' : 'N');
+                      key: kOptionDirectServer, value: val);
                 },
               ),
             ],
