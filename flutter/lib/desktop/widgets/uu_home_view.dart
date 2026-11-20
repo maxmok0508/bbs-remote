@@ -9,7 +9,7 @@ import 'package:flutter_hbb/common/formatter/id_formatter.dart';
 import 'package:flutter_hbb/common/hbbs/hbbs.dart';
 import 'package:flutter_hbb/common/widgets/dialog.dart';
 import 'package:flutter_hbb/consts.dart';
-import 'package:flutter_hbb/desktop/pages/desktop_setting_page.dart';
+import 'package:flutter_hbb/desktop/widgets/bbs_settings_view.dart';
 import 'package:flutter_hbb/models/ab_model.dart';
 import 'package:flutter_hbb/models/peer_model.dart';
 import 'package:flutter_hbb/models/platform_model.dart';
@@ -19,6 +19,9 @@ import 'package:get/get.dart';
 import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+// 0: 我的设备, 1: 本机被控权限, 2: 设置中心, 3: 临时协助他人
+final RxInt bbsUuNavIndex = 0.obs;
+
 class BbsUuHomeView extends StatefulWidget {
   const BbsUuHomeView({Key? key}) : super(key: key);
 
@@ -27,8 +30,6 @@ class BbsUuHomeView extends StatefulWidget {
 }
 
 class _BbsUuHomeViewState extends State<BbsUuHomeView> {
-  int _navIndex = 0; // 0: 我的设备, 1: 本机被控权限, 2: 临时协助他人
-
   // Login controllers
   late final TextEditingController _userCtrl;
   final TextEditingController _passCtrl = TextEditingController();
@@ -42,6 +43,7 @@ class _BbsUuHomeViewState extends State<BbsUuHomeView> {
   String _myId = '';
   String _myHostname = '';
   bool _installingToApps = false;
+  bool _permBannerDismissed = false;
 
   // Quick manual assist controllers
   final IDTextEditingController _manualIdCtrl = IDTextEditingController();
@@ -55,7 +57,11 @@ class _BbsUuHomeViewState extends State<BbsUuHomeView> {
   bool _daemonInstalled = true;
 
   Timer? _pollTimer;
+  Worker? _navWorker;
   int _tick = 0;
+
+  int get _navIndex => bbsUuNavIndex.value;
+  set _navIndex(int v) => bbsUuNavIndex.value = v;
 
   bool get _isRunningFromDmgVolume =>
       isMacOS && Platform.resolvedExecutable.startsWith('/Volumes/');
@@ -68,14 +74,20 @@ class _BbsUuHomeViewState extends State<BbsUuHomeView> {
     super.initState();
     final savedName = UserModel.getLocalUserInfo()?['name']?.toString() ?? '';
     _userCtrl = TextEditingController(text: savedName);
+    _permBannerDismissed =
+        bind.mainGetLocalOption(key: 'bbs_hide_perm_tip') == 'Y';
+    _navWorker = ever<int>(bbsUuNavIndex, (_) {
+      if (mounted) setState(() {});
+    });
     _initLocalInfoAndSync();
-    _pollTimer = Timer.periodic(const Duration(seconds: 2), (_) {
+    _pollTimer = Timer.periodic(const Duration(seconds: 1), (_) {
       _onPeriodicTick();
     });
   }
 
   @override
   void dispose() {
+    _navWorker?.dispose();
     _pollTimer?.cancel();
     _userCtrl.dispose();
     _passCtrl.dispose();
@@ -163,7 +175,7 @@ class _BbsUuHomeViewState extends State<BbsUuHomeView> {
     if (_myId.isEmpty) {
       await _refreshLocalInfo();
     }
-    if (gFFI.userModel.isLogin && _tick % 3 == 0) {
+    if (gFFI.userModel.isLogin && _tick % 5 == 0) {
       await _refreshDevicesAndOnlines(quiet: true);
     }
   }
@@ -640,14 +652,18 @@ rm -rf "$targetApp" && cp -R "$appBundleDir" "$targetApp" && xattr -cr "$targetA
             child: Column(
               children: [
                 if (_isRunningFromDmgVolume) _buildDmgInstallBanner(),
-                if (_navIndex == 0 && _needsMacCorePermissions)
+                if (_navIndex == 0 &&
+                    _needsMacCorePermissions &&
+                    !_permBannerDismissed)
                   _buildPermissionWarningBanner(),
                 Expanded(
                   child: _navIndex == 0
                       ? _buildMyDevicesPage(context, isDark)
                       : (_navIndex == 1
                           ? _buildPermissionsPage(context, isDark)
-                          : _buildManualAssistPage(context, isDark)),
+                          : (_navIndex == 2
+                              ? const BbsSettingsView()
+                              : _buildManualAssistPage(context, isDark))),
                 ),
               ],
             ),
@@ -736,8 +752,21 @@ rm -rf "$targetApp" && cp -R "$appBundleDir" "$targetApp" && xattr -cr "$targetA
               shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(8)),
             ),
-            child: const Text('一键去开启',
+            child: const Text('去开启/修复',
                 style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600)),
+          ),
+          const SizedBox(width: 6),
+          Tooltip(
+            message: '关闭并不再提示',
+            child: IconButton(
+              onPressed: () async {
+                setState(() => _permBannerDismissed = true);
+                await bind.mainSetLocalOption(
+                    key: 'bbs_hide_perm_tip', value: 'Y');
+              },
+              icon: const Icon(Icons.close_rounded, size: 18),
+              splashRadius: 16,
+            ),
           ),
         ],
       ),
@@ -913,6 +942,13 @@ rm -rf "$targetApp" && cp -R "$appBundleDir" "$targetApp" && xattr -cr "$targetA
           ],
           _buildNavItem(
             index: 2,
+            icon: Icons.tune_rounded,
+            label: '设置中心',
+            isDark: isDark,
+          ),
+          const SizedBox(height: 6),
+          _buildNavItem(
+            index: 3,
             icon: Icons.cast_connected_rounded,
             label: '临时协助他人',
             isDark: isDark,
@@ -974,15 +1010,14 @@ rm -rf "$targetApp" && cp -R "$appBundleDir" "$targetApp" && xattr -cr "$targetA
           ),
           const SizedBox(height: 10),
 
-          // Bottom Actions: Display Settings + Logout
+          // Bottom Actions: Settings + Logout
           Row(
             children: [
               Expanded(
                 child: OutlinedButton.icon(
-                  onPressed: () =>
-                      DesktopSettingPage.switch2page(SettingsTabKey.display),
-                  icon: const Icon(Icons.tune_rounded, size: 15),
-                  label: const Text('偏好设置', style: TextStyle(fontSize: 12)),
+                  onPressed: () => setState(() => _navIndex = 2),
+                  icon: const Icon(Icons.settings_outlined, size: 15),
+                  label: const Text('设置中心', style: TextStyle(fontSize: 12)),
                   style: OutlinedButton.styleFrom(
                     padding: const EdgeInsets.symmetric(vertical: 9),
                     shape: RoundedRectangleBorder(
@@ -1467,21 +1502,7 @@ rm -rf "$targetApp" && cp -R "$appBundleDir" "$targetApp" && xattr -cr "$targetA
           ),
           const SizedBox(height: 12),
           _buildPermItem(
-            title: '3. 输入监控权限（推荐）',
-            desc: '提升远程快捷键与游戏/办公组合键响应能力',
-            granted: _canInputMonitor,
-            cardBg: cardBg,
-            cardBorder: cardBorder,
-            subColor: subColor,
-            onConfigure: () {
-              bind.mainIsCanInputMonitoring(prompt: true);
-              launchUrl(Uri.parse(
-                  'x-apple.systempreferences:com.apple.preference.security?Privacy_ListenEvent'));
-            },
-          ),
-          const SizedBox(height: 12),
-          _buildPermItem(
-            title: '4. 开机自启后台守护服务（可选 · 无人值守推荐）',
+            title: '3. 开机自启后台守护服务（可选 · 无人值守推荐）',
             desc: '安装系统守护进程后，即使重启电脑、停留在锁屏界面也能随时一键远控本机',
             granted: _daemonInstalled,
             cardBg: cardBg,
@@ -1495,6 +1516,73 @@ rm -rf "$targetApp" && cp -R "$appBundleDir" "$targetApp" && xattr -cr "$targetA
                 bind.mainIsInstalledDaemon(prompt: true);
               }
             },
+          ),
+          const SizedBox(height: 16),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+            decoration: BoxDecoration(
+              color: cardBg,
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(color: cardBorder),
+            ),
+            child: Row(
+              children: [
+                const Icon(Icons.auto_fix_high_rounded,
+                    color: Color(0xFF2563EB), size: 24),
+                const SizedBox(width: 14),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text('系统设置里开关已经打开，但这里仍显示未开启？',
+                          style: TextStyle(
+                              fontSize: 14, fontWeight: FontWeight.w600)),
+                      const SizedBox(height: 3),
+                      Text(
+                        '升级替换安装包后 macOS 可能保留旧版本签名记录，点击右侧「重置修复识别」后重新勾选或重启客户端即可立即消除。',
+                        style: TextStyle(fontSize: 12, color: subColor),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 10),
+                OutlinedButton(
+                  onPressed: () async {
+                    await Process.run('/bin/sh', [
+                      '-c',
+                      'tccutil reset ScreenCapture com.bbs.remote 2>/dev/null || true; '
+                          'tccutil reset Accessibility com.bbs.remote 2>/dev/null || true; '
+                          'tccutil reset ListenEvent com.bbs.remote 2>/dev/null || true'
+                    ]);
+                    bind.mainIsCanScreenRecording(prompt: true);
+                    bind.mainIsProcessTrusted(prompt: true);
+                    showToast('已重置旧权限记录，请在弹出的系统窗口重新开启');
+                    _refreshPermissions();
+                  },
+                  child:
+                      const Text('重置修复识别', style: TextStyle(fontSize: 12.5)),
+                ),
+                const SizedBox(width: 8),
+                ElevatedButton(
+                  onPressed: () async {
+                    final exe = File(Platform.resolvedExecutable);
+                    final appPath = exe.parent.parent.parent.path;
+                    if (appPath.endsWith('.app')) {
+                      await Process.start('open', ['-n', appPath]);
+                      await Future.delayed(const Duration(milliseconds: 350));
+                      exit(0);
+                    }
+                  },
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFF2563EB),
+                    foregroundColor: Colors.white,
+                    elevation: 0,
+                  ),
+                  child:
+                      const Text('重启客户端', style: TextStyle(fontSize: 12.5)),
+                ),
+              ],
+            ),
           ),
         ],
       ),

@@ -2534,6 +2534,7 @@ pub fn load_custom_client() {
         buildin.insert(keys::OPTION_HIDE_PROXY_SETTINGS.to_owned(), "Y".to_owned());
         buildin.insert(keys::OPTION_HIDE_WEBSOCKET_SETTINGS.to_owned(), "Y".to_owned());
         buildin.insert(keys::OPTION_REMOVE_PRESET_PASSWORD_WARNING.to_owned(), "Y".to_owned());
+        buildin.insert("hide-powered-by-me".to_owned(), "Y".to_owned());
         drop(buildin);
         config::DEFAULT_SETTINGS
             .write()

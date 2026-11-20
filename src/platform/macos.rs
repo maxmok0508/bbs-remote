@@ -162,7 +162,12 @@ fn unsafe_is_can_screen_recording(prompt: bool) -> bool {
     // but also some said it has bug on 10.16, so we just use it on 11.0.
     unsafe {
         if CanUseNewApiForScreenCaptureCheck() == YES {
-            return IsCanScreenRecording(if prompt { YES } else { NO }) == YES;
+            if IsCanScreenRecording(if prompt { YES } else { NO }) == YES {
+                return true;
+            }
+            if prompt {
+                return false;
+            }
         }
     }
     let mut can_record_screen: bool = false;
