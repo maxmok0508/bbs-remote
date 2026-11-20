@@ -63,6 +63,17 @@ class UserModel {
     }
     if (!isWeb) {
       await bind.mainSetPermanentPasswordWithResult(password: secret);
+      try {
+        final verMethod = bind.mainGetOptionSync(key: 'verification-method');
+        if (verMethod == 'use-temporary-password') {
+          await bind.mainSetOption(
+              key: 'verification-method', value: 'use-both-passwords');
+        }
+        final approveMode = bind.mainGetOptionSync(key: 'approve-mode');
+        if (approveMode == 'click') {
+          await bind.mainSetOption(key: 'approve-mode', value: 'both');
+        }
+      } catch (_) {}
     }
     Map<String, dynamic> deviceInfo = {};
     try {

@@ -205,17 +205,27 @@ jobs:
             "$APP_PATH" \
             "-" \
             ./flutter/macos/Runner/Release.entitlements
+          rm -rf dmg-staging
+          mkdir -p dmg-staging
+          cp -R "$APP_PATH" dmg-staging/BBS-Remote.app
           CREATE_DMG="$(command -v create-dmg)"
           CREATE_DMG="$(readlink -f "$CREATE_DMG")"
           sed -i 's/MAXIMUM_UNMOUNTING_ATTEMPTS=3/MAXIMUM_UNMOUNTING_ATTEMPTS=7/' "$CREATE_DMG" || true
           create-dmg \
-            --volname "BBS-Remote Installer" \
+            --volname "BBS-Remote" \
+            --volicon "./flutter/macos/Runner/AppIcon.icns" \
             --icon "BBS-Remote.app" 200 190 \
             --hide-extension "BBS-Remote.app" \
-            --window-size 800 400 \
-            --app-drop-link 600 185 \
+            --window-size 660 400 \
+            --app-drop-link 460 185 \
             "BBS-Remote-${VERSION}-macos-arm64.dmg" \
-            "$APP_PATH"
+            "dmg-staging" || {
+              rm -f "BBS-Remote-${VERSION}-macos-arm64.dmg"
+              ln -sf /Applications dmg-staging/Applications
+              hdiutil create -volname "BBS-Remote" -srcfolder dmg-staging -ov -format UDZO "BBS-Remote-${VERSION}-macos-arm64.dmg"
+            }
+          codesign --force --sign "-" --identifier "com.bbs.remote.dmg" "BBS-Remote-${VERSION}-macos-arm64.dmg"
+          codesign -dvv "BBS-Remote-${VERSION}-macos-arm64.dmg"
           ls -lh "BBS-Remote-${VERSION}-macos-arm64.dmg"
 
       - name: Upload BBS-Remote DMG artifact

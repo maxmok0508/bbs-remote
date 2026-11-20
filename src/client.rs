@@ -859,7 +859,9 @@ impl Client {
         };
 
         let switch_code = interface.get_switch_code();
-        let legacy_secure = !key.is_empty() && (!token.is_empty() || !switch_code.is_empty());
+        let legacy_secure = !crate::is_custom_client()
+            && !key.is_empty()
+            && (!token.is_empty() || !switch_code.is_empty());
         let carries_offer = webrtc_offerer.as_ref().and_then(|g| g.stream()).is_some();
         // Counted from before the key exchange, so the exchange spends the UDP NAT test's own
         // wait rather than replacing it: the test runs beside both.

@@ -2318,6 +2318,9 @@ async fn secure_tcp_impl(conn: &mut Stream, key: &str, log_on_success: bool) -> 
 /// when the server sent something else first, nothing parseable, or closed: `secure_tcp`
 /// tolerates that for servers from before the exchange, `secure_tcp_required` does not.
 async fn key_exchange(conn: &mut Stream, key: &str, log_on_success: bool) -> ResultType<bool> {
+    if is_custom_client() {
+        return Ok(false);
+    }
     let rs_pk = get_rs_pk(key);
     let Some(rs_pk) = rs_pk else {
         bail!("Handshake failed: invalid public key from rendezvous server");

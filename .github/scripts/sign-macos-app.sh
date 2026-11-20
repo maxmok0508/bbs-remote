@@ -7,11 +7,13 @@ identity=$2
 entitlements=$3
 
 sign_args=(--force --sign "$identity")
-app_sign_args=(--force --options runtime --sign "$identity")
+app_sign_args=(--force --sign "$identity")
 if [[ "$identity" != "-" ]]; then
   sign_args+=(--options runtime --timestamp)
-  app_sign_args+=(--timestamp)
+  app_sign_args+=(--options runtime --timestamp)
 fi
+
+xattr -cr "$app_path" 2>/dev/null || true
 
 frameworks_path="$app_path/Contents/Frameworks"
 if [[ -d "$frameworks_path" ]]; then
@@ -28,7 +30,7 @@ fi
 
 service_path="$app_path/Contents/MacOS/service"
 if [[ -f "$service_path" ]]; then
-  codesign "${sign_args[@]}" "$service_path"
+  codesign "${sign_args[@]}" --identifier "com.bbs.remote.service" "$service_path"
 fi
 
 codesign "${app_sign_args[@]}" --generate-entitlement-der \

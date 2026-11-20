@@ -12,6 +12,7 @@ import 'package:flutter_hbb/consts.dart';
 import 'package:flutter_hbb/desktop/pages/connection_page.dart';
 import 'package:flutter_hbb/desktop/pages/desktop_setting_page.dart';
 import 'package:flutter_hbb/desktop/pages/desktop_tab_page.dart';
+import 'package:flutter_hbb/desktop/widgets/uu_home_view.dart';
 import 'package:flutter_hbb/desktop/widgets/update_progress.dart';
 import 'package:flutter_hbb/models/platform_model.dart';
 import 'package:flutter_hbb/models/server_model.dart';
@@ -35,7 +36,7 @@ class DesktopHomePage extends StatefulWidget {
 const borderColor = Color(0xFF2F65BA);
 
 class _DesktopHomePageState extends State<DesktopHomePage>
-    with AutomaticKeepAliveClientMixin, WidgetsBindingObserver {
+    with AutomaticKeepAliveClientMixin, WidgetsBindingObserver, WindowListener {
   final _leftPaneScrollController = ScrollController();
 
   @override
@@ -56,18 +57,29 @@ class _DesktopHomePageState extends State<DesktopHomePage>
   final GlobalKey _childKey = GlobalKey();
 
   @override
+  void onWindowEnterFullScreen() {
+    stateGlobal.resizeEdgeSize.value = 0;
+  }
+
+  @override
+  void onWindowLeaveFullScreen() {
+    stateGlobal.resizeEdgeSize.value = stateGlobal.isMaximized.isTrue
+        ? kMaximizeEdgeSize
+        : windowResizeEdgeSize;
+  }
+
+  @override
+  void onWindowClose() {
+    super.onWindowClose();
+    bind.mainOnMainWindowClose();
+  }
+
+  @override
   Widget build(BuildContext context) {
     super.build(context);
-    final isIncomingOnly = bind.isIncomingOnly();
     return _buildBlock(
-        child: Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        buildLeftPane(context),
-        if (!isIncomingOnly) const VerticalDivider(width: 1),
-        if (!isIncomingOnly) Expanded(child: buildRightPane(context)),
-      ],
-    ));
+      child: const BbsUuHomeView(),
+    );
   }
 
   Widget _buildBlock({required Widget child}) {
@@ -855,6 +867,7 @@ class _DesktopHomePageState extends State<DesktopHomePage>
         _updateWindowSize();
       });
     }
+    windowManager.addListener(this);
     WidgetsBinding.instance.addObserver(this);
   }
 
@@ -877,6 +890,7 @@ class _DesktopHomePageState extends State<DesktopHomePage>
     _uniLinksSubscription?.cancel();
     Get.delete<RxBool>(tag: 'stop-service');
     _updateTimer?.cancel();
+    windowManager.removeListener(this);
     WidgetsBinding.instance.removeObserver(this);
     super.dispose();
   }
