@@ -279,6 +279,7 @@ class FfiModel with ChangeNotifier {
     } catch (e) {
       //
     }
+    parent.target?.qualityMonitorModel.notifyListeners();
   }
 
   Widget? getConnectionImageText() {
@@ -3908,6 +3909,20 @@ class QualityMonitorModel with ChangeNotifier {
 
   bool get show => _show;
   QualityMonitorData get data => _data;
+
+  bool? get isDirect => parent.target?.ffiModel.direct;
+
+  String get connectionModeLabel {
+    final ffiModel = parent.target?.ffiModel;
+    if (ffiModel == null || ffiModel.direct == null) {
+      return '-';
+    }
+    final st = ffiModel.cachedPeerData.streamType.trim();
+    if (ffiModel.direct == true) {
+      return st.isNotEmpty ? 'P2P 直连 ($st)' : 'P2P 直连';
+    }
+    return '专线中转 (Relay)';
+  }
 
   // Only a WebRTC session on the web names its transport here: web has no
   // session tab to show it on (the desktop tab's tooltip already does), and

@@ -563,21 +563,29 @@ class QualityMonitor extends StatelessWidget {
   QualityMonitor(this.qualityMonitorModel);
 
   Widget _row(String info, String? value, {Color? rightColor}) {
-    return Row(
-      children: [
-        Expanded(
-            flex: 8,
-            child: AutoSizeText(info,
-                style: TextStyle(color: Color.fromARGB(255, 210, 210, 210)),
-                textAlign: TextAlign.right,
-                maxLines: 1)),
-        Spacer(flex: 1),
-        Expanded(
-            flex: 8,
-            child: AutoSizeText(value ?? '',
-                style: TextStyle(color: rightColor ?? Colors.white),
-                maxLines: 1)),
-      ],
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 1.5),
+      child: Row(
+        children: [
+          Expanded(
+              flex: 6,
+              child: AutoSizeText(info,
+                  style:
+                      const TextStyle(color: Color.fromARGB(255, 210, 210, 210)),
+                  textAlign: TextAlign.right,
+                  maxLines: 1)),
+          const Spacer(flex: 1),
+          Expanded(
+              flex: 11,
+              child: AutoSizeText(value ?? '',
+                  style: TextStyle(
+                      color: rightColor ?? Colors.white,
+                      fontWeight: rightColor != null
+                          ? FontWeight.w600
+                          : FontWeight.normal),
+                  maxLines: 1)),
+        ],
+      ),
     );
   }
 
@@ -588,21 +596,32 @@ class QualityMonitor extends StatelessWidget {
           builder: (context, qualityMonitorModel, child) => qualityMonitorModel
                   .show
               ? Container(
-                  constraints: BoxConstraints(maxWidth: 200),
-                  padding: const EdgeInsets.all(8),
-                  color: MyTheme.canvasColor.withAlpha(150),
+                  constraints: const BoxConstraints(maxWidth: 235),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                  decoration: BoxDecoration(
+                    color: MyTheme.canvasColor.withAlpha(175),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      _row("Speed", qualityMonitorModel.data.speed ?? '-'),
-                      _row("FPS", qualityMonitorModel.data.fps ?? '-'),
+                      _row(
+                        "连接通道",
+                        qualityMonitorModel.connectionModeLabel,
+                        rightColor: qualityMonitorModel.isDirect == true
+                            ? const Color(0xFF34D399)
+                            : const Color(0xFF38BDF8),
+                      ),
+                      _row("实时速率", qualityMonitorModel.data.speed ?? '-'),
+                      _row("实时帧率", qualityMonitorModel.data.fps ?? '-'),
                       // let delay be 0 if fps is 0
                       _row(
-                          "Delay",
-                          "${qualityMonitorModel.data.delay == null ? '-' : (qualityMonitorModel.data.fps ?? "").replaceAll(' ', '').replaceAll('0', '').isEmpty ? 0 : qualityMonitorModel.data.delay}ms",
+                          "网络延迟",
+                          "${qualityMonitorModel.data.delay == null ? '-' : (qualityMonitorModel.data.fps ?? "").replaceAll(' ', '').replaceAll('0', '').isEmpty ? 0 : qualityMonitorModel.data.delay} ms",
                           rightColor: Colors.green),
                       _row(
-                          "Target Bitrate",
+                          "目标码率",
                           qualityMonitorModel.data.targetBitrate == null
                               ? '-'
                               : () {
@@ -613,8 +632,8 @@ class QualityMonitor extends StatelessWidget {
                                       : '${(kbps / 1000.0).toStringAsFixed(2)} Mbps';
                                 }()),
                       _row(
-                          "Codec", qualityMonitorModel.data.codecFormat ?? '-'),
-                      _row("Chroma", qualityMonitorModel.data.chroma ?? '-'),
+                          "视频编码", qualityMonitorModel.data.codecFormat ?? '-'),
+                      _row("色彩模式", qualityMonitorModel.data.chroma ?? '-'),
                       if (qualityMonitorModel.webrtcTransport != null)
                         _row("Transport",
                             qualityMonitorModel.webrtcTransport!),
