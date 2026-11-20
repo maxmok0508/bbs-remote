@@ -154,8 +154,12 @@ jobs:
         env:
           BBS_RENDEZVOUS_SERVER: ${{ secrets.RENDEZVOUS_SERVER }}
           BBS_RS_PUB_KEY: ${{ secrets.RS_PUB_KEY }}
-          VCPKG_ROOT: ${{ env.VCPKG_ROOT }}
         run: |
+          Write-Host "VCPKG_ROOT = $env:VCPKG_ROOT"
+          if (-not (Test-Path "$env:VCPKG_ROOT\installed\x64-windows-static\include\libavcodec\avcodec.h")) {
+            Write-Error "Missing FFmpeg headers under $env:VCPKG_ROOT\installed\x64-windows-static\include"
+            exit 1
+          }
           python build.py --flutter --hwcodec --skip-portable-pack
           $outDir = "BBS-Remote-${env:VERSION}-windows-x64"
           Copy-Item -Recurse -Force "flutter/build/windows/x64/runner/Release" $outDir
@@ -239,6 +243,9 @@ jobs:
         shell: bash
         run: |
           APP_PATH="./flutter/build/macos/Build/Products/Release/BBS-Remote.app"
+          /usr/bin/vtool -set-build-version macos 13.0 26.0 -replace \
+            -output "$APP_PATH/Contents/MacOS/BBS-Remote" \
+            "$APP_PATH/Contents/MacOS/BBS-Remote"
           bash ./.github/scripts/sign-macos-app.sh "$APP_PATH" "-" ./flutter/macos/Runner/Release.entitlements
           rm -rf dmg-staging
           mkdir -p dmg-staging

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_hbb/mobile/pages/bbs_mobile_home_page.dart';
 import 'package:flutter_hbb/mobile/pages/server_page.dart';
 import 'package:flutter_hbb/mobile/pages/settings_page.dart';
 import 'package:flutter_hbb/web/settings_page.dart';
@@ -61,6 +62,9 @@ class HomePageState extends State<HomePage> {
 
   @override
   Widget build(BuildContext context) {
+    if (!isWeb) {
+      return const BbsMobileHomePage();
+    }
     return WillPopScope(
         onWillPop: () async {
           if (_selectedIndex != 0) {

@@ -1,5 +1,5 @@
 <resources>
-    <string name="app_name">RustDesk</string>
-    <string name="accessibility_service_description">Allow other devices to control your phone using virtual touch, when RustDesk screen sharing is established</string>
-    <string name="foreground_service_special_use_subtype">Keeps the RustDesk remote desktop host available for authorized unattended connections and foreground notifications without starting screen capture before user approval.</string>
+    <string name="app_name">BBS-Remote</string>
+    <string name="accessibility_service_description">允许远程设备在您授权后通过虚拟触控操控当前手机（BBS-Remote 远程控制）</string>
+    <string name="foreground_service_special_use_subtype">保持 BBS-Remote 后台在线状态以接收您的授权远控连接，未经您确认不会开启录屏。</string>
 </resources>

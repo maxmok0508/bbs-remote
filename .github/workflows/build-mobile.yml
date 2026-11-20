@@ -1,0 +1,277 @@
+name: Build BBS-Remote Mobile (Android APK & iOS IPA)
+
+on:
+  workflow_dispatch:
+    inputs:
+      target:
+        description: "Build target (all, android-arm64, ios-arm64)"
+        required: true
+        default: "all"
+        type: choice
+        options:
+          - all
+          - android-arm64
+          - ios-arm64
+
+env:
+  FLUTTER_RUST_BRIDGE_VERSION: "1.80.1"
+  BRIDGE_RUST_VERSION: "1.75"
+  BUILD_RUST_VERSION: "1.81"
+  FLUTTER_VERSION: "3.24.5"
+  VCPKG_BINARY_SOURCES: "clear;x-gha,readwrite"
+  VCPKG_COMMIT_ID: "9e593bb18ea69cc5095e012465dcd675a822ed0d"
+  VERSION: "1.5.3"
+
+jobs:
+  generate_bridge:
+    name: Generate Flutter-Rust Bridge (3.24)
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout source code
+        uses: actions/checkout@v4
+
+      - name: Cache generated Flutter-Rust bridge
+        id: cache_bridge
+        uses: actions/cache@v4
+        with:
+          path: |
+            ./src/bridge_generated.rs
+            ./src/bridge_generated.io.rs
+            ./flutter/lib/generated_bridge.dart
+            ./flutter/lib/generated_bridge.freezed.dart
+            ./flutter/macos/Runner/bridge_generated.h
+            ./flutter/ios/Runner/bridge_generated.h
+          key: frb-3.24-${{ hashFiles('src/flutter_ffi.rs') }}
+
+      - name: Install prerequisites
+        if: steps.cache_bridge.outputs.cache-hit != 'true'
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y ca-certificates clang cmake curl gcc g++ libclang-dev libgtk-3-dev llvm-dev nasm ninja-build pkg-config
+
+      - name: Install Rust toolchain
+        if: steps.cache_bridge.outputs.cache-hit != 'true'
+        uses: dtolnay/rust-toolchain@v1
+        with:
+          toolchain: ${{ env.BRIDGE_RUST_VERSION }}
+          components: "rustfmt"
+
+      - name: Install Flutter
+        if: steps.cache_bridge.outputs.cache-hit != 'true'
+        uses: subosito/flutter-action@v2
+        with:
+          channel: "stable"
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          cache: true
+
+      - name: Install flutter_rust_bridge_codegen
+        if: steps.cache_bridge.outputs.cache-hit != 'true'
+        run: |
+          cargo install --locked cargo-expand --version 1.0.95
+          cargo install --locked flutter_rust_bridge_codegen --version ${{ env.FLUTTER_RUST_BRIDGE_VERSION }}
+
+      - name: Generate bridge files
+        if: steps.cache_bridge.outputs.cache-hit != 'true'
+        run: |
+          pushd flutter
+          flutter pub get
+          popd
+          flutter_rust_bridge_codegen \
+            --rust-input ./src/flutter_ffi.rs \
+            --dart-output ./flutter/lib/generated_bridge.dart \
+            --c-output ./flutter/macos/Runner/bridge_generated.h \
+            --extra-c-output-path ./flutter/ios/Runner/bridge_generated.h
+
+      - name: Upload bridge artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: bridge-artifact-mobile-3.24
+          path: |
+            ./src/bridge_generated.rs
+            ./src/bridge_generated.io.rs
+            ./flutter/lib/generated_bridge.dart
+            ./flutter/lib/generated_bridge.freezed.dart
+            ./flutter/macos/Runner/bridge_generated.h
+            ./flutter/ios/Runner/bridge_generated.h
+          retention-days: 7
+
+  build_android_arm64:
+    name: Build Android ARM64 APK
+    if: ${{ inputs.target == 'all' || inputs.target == 'android-arm64' }}
+    needs: generate_bridge
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout source code
+        uses: actions/checkout@v4
+
+      - name: Verify encrypted server secrets
+        env:
+          BBS_RENDEZVOUS_SERVER: ${{ secrets.RENDEZVOUS_SERVER }}
+          BBS_RS_PUB_KEY: ${{ secrets.RS_PUB_KEY }}
+        run: |
+          if [ -z "$BBS_RENDEZVOUS_SERVER" ] || [ -z "$BBS_RS_PUB_KEY" ]; then
+            echo "ERROR: Missing RENDEZVOUS_SERVER or RS_PUB_KEY in GitHub Secrets!" >&2
+            exit 1
+          fi
+
+      - name: Install Linux & Android NDK dependencies
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y autoconf automake build-essential clang cmake curl libclang-dev libtool nasm ninja-build pkg-config unzip yasm zip
+          NDK_DIR="$(ls -d "${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}"/ndk/* 2>/dev/null | sort -V | tail -n 1)"
+          if [ -z "$NDK_DIR" ]; then
+            yes | "${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}/cmdline-tools/latest/bin/sdkmanager" "ndk;26.3.11579264"
+            NDK_DIR="${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}/ndk/26.3.11579264"
+          fi
+          echo "ANDROID_NDK_HOME=$NDK_DIR" >> "$GITHUB_ENV"
+          echo "ANDROID_NDK_ROOT=$NDK_DIR" >> "$GITHUB_ENV"
+          echo "Using NDK: $NDK_DIR"
+
+      - name: Setup Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: "temurin"
+          java-version: "17"
+
+      - name: Install Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: "stable"
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          cache: true
+
+      - name: Install Rust toolchain & cargo-ndk
+        uses: dtolnay/rust-toolchain@v1
+        with:
+          toolchain: ${{ env.BUILD_RUST_VERSION }}
+          targets: aarch64-linux-android
+
+      - name: Install cargo-ndk
+        run: cargo install --locked cargo-ndk --version 3.5.4
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          prefix-key: android-arm64
+
+      - name: Download bridge artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: bridge-artifact-mobile-3.24
+          path: ./
+
+      - name: Setup vcpkg
+        uses: lukka/run-vcpkg@b1a0dd252f06b9e25b3c022a9a03bd7a427fb6a2
+        with:
+          vcpkgGitCommitId: ${{ env.VCPKG_COMMIT_ID }}
+          doNotCache: false
+
+      - name: Install vcpkg arm64-android dependencies
+        run: |
+          "$VCPKG_ROOT/vcpkg" install --triplet=arm64-android --x-install-root="$VCPKG_ROOT/installed"
+
+      - name: Build Rust core for Android arm64-v8a
+        env:
+          BBS_RENDEZVOUS_SERVER: ${{ secrets.RENDEZVOUS_SERVER }}
+          BBS_RS_PUB_KEY: ${{ secrets.RS_PUB_KEY }}
+        run: |
+          cargo ndk --platform 21 --target aarch64-linux-android build --locked --release --features flutter,hwcodec --lib
+          mkdir -p flutter/android/app/src/main/jniLibs/arm64-v8a
+          cp -f target/aarch64-linux-android/release/liblibrustdesk.so flutter/android/app/src/main/jniLibs/arm64-v8a/librustdesk.so
+          cp -f "$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/sysroot/usr/lib/aarch64-linux-android/libc++_shared.so" \
+            flutter/android/app/src/main/jniLibs/arm64-v8a/libc++_shared.so
+
+      - name: Build signed BBS-Remote Android APK
+        run: |
+          pushd flutter
+          flutter pub get
+          flutter build apk --release --target-platform android-arm64 --build-name="${VERSION}" --build-number=153
+          popd
+          cp -f flutter/build/app/outputs/flutter-apk/app-release.apk "BBS-Remote-${VERSION}-android-arm64.apk"
+
+      - name: Upload Android APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: BBS-Remote-android-arm64-apk
+          path: BBS-Remote-${{ env.VERSION }}-android-arm64.apk
+          retention-days: 30
+
+  build_ios_arm64:
+    name: Build iOS ARM64 IPA
+    if: ${{ inputs.target == 'all' || inputs.target == 'ios-arm64' }}
+    needs: generate_bridge
+    runs-on: macos-15
+    steps:
+      - name: Checkout source code
+        uses: actions/checkout@v4
+
+      - name: Verify encrypted server secrets
+        env:
+          BBS_RENDEZVOUS_SERVER: ${{ secrets.RENDEZVOUS_SERVER }}
+          BBS_RS_PUB_KEY: ${{ secrets.RS_PUB_KEY }}
+        run: |
+          if [ -z "$BBS_RENDEZVOUS_SERVER" ] || [ -z "$BBS_RS_PUB_KEY" ]; then
+            echo "ERROR: Missing RENDEZVOUS_SERVER or RS_PUB_KEY in GitHub Secrets!" >&2
+            exit 1
+          fi
+
+      - name: Install build runtime
+        run: |
+          brew install llvm nasm pkg-config autoconf automake libtool
+
+      - name: Install Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: "stable"
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          cache: true
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@v1
+        with:
+          toolchain: ${{ env.BUILD_RUST_VERSION }}
+          targets: aarch64-apple-ios
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          prefix-key: ios-arm64
+
+      - name: Download bridge artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: bridge-artifact-mobile-3.24
+          path: ./
+
+      - name: Setup vcpkg
+        uses: lukka/run-vcpkg@b1a0dd252f06b9e25b3c022a9a03bd7a427fb6a2
+        with:
+          vcpkgGitCommitId: ${{ env.VCPKG_COMMIT_ID }}
+          doNotCache: false
+
+      - name: Install vcpkg arm64-ios dependencies
+        run: |
+          "$VCPKG_ROOT/vcpkg" install --triplet=arm64-ios --x-install-root="$VCPKG_ROOT/installed"
+
+      - name: Build Rust core for iOS arm64
+        env:
+          BBS_RENDEZVOUS_SERVER: ${{ secrets.RENDEZVOUS_SERVER }}
+          BBS_RS_PUB_KEY: ${{ secrets.RS_PUB_KEY }}
+        run: |
+          IPHONEOS_DEPLOYMENT_TARGET=15.0 cargo build --target aarch64-apple-ios --locked --release --features flutter,hwcodec --lib
+
+      - name: Build BBS-Remote iOS IPA (unsigned for AltStore/SideStore/TestFlight)
+        run: |
+          pushd flutter
+          flutter pub get
+          flutter build ios --release --no-codesign --build-name="${VERSION}" --build-number=153
+          popd
+          rm -rf Payload
+          mkdir -p Payload
+          cp -R flutter/build/ios/iphoneos/Runner.app Payload/BBS-Remote.app
+          zip -qry "BBS-Remote-${VERSION}-ios-arm64.ipa" Payload
+
+      - name: Upload iOS IPA artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: BBS-Remote-ios-arm64-ipa
+          path: BBS-Remote-${{ env.VERSION }}-ios-arm64.ipa
+          retention-days: 30
