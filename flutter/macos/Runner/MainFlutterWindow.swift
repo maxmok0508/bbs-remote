@@ -70,43 +70,43 @@ class MainFlutterWindow: NSWindow {
             && !cliArgs.contains("multi_window")
 
         if isPureMainWindow {
-            self.styleMask.insert(.fullSizeContentView)
-            self.titlebarAppearsTransparent = true
-            self.titleVisibility = .hidden
-            self.isOpaque = false
-            self.backgroundColor = .clear
+            self.styleMask.insert([.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView])
+            self.titlebarAppearsTransparent = false
+            self.titleVisibility = .visible
+            self.title = "BBS-Remote"
+            self.toolbarStyle = .unified
+            self.isOpaque = true
+            self.backgroundColor = .windowBackgroundColor
             self.hasShadow = true
-            self.minSize = NSSize(width: 960, height: 640)
+            self.minSize = NSSize(width: 860, height: 560)
 
-            let containerVC = NSViewController()
-            let rootView = NSView(frame: windowFrame)
-            rootView.wantsLayer = true
-            containerVC.view = rootView
+            // Genuine Apple Native SwiftUI NavigationSplitView + macOS 26 Tahoe Liquid Glass UI.
+            // CRITICAL: NSHostingController MUST be set directly as window.contentViewController
+            // so SwiftUI bridges NavigationSplitView's floating Liquid Glass sidebar,
+            // splitViewSeparator, .toolbar glass pills, and .searchable bar directly to NSWindow.toolbar!
+            let hostingController = NSHostingController(
+                rootView: BbsLiquidGlassRootView(store: BbsNativeStore.shared)
+            )
+            // CRITICAL: Disable automatic window resizing from SwiftUI intrinsic content size
+            // so macOS window resizing, Split View, and fullscreen work 100% natively.
+            if #available(macOS 13.0, *) {
+                hostingController.sizingOptions = []
+            }
+            self.contentViewController = hostingController
 
-            // 1. Real macOS desktop wallpaper liquid refraction layer
-            let visualEffect = NSVisualEffectView(frame: rootView.bounds)
-            visualEffect.material = .underWindowBackground
-            visualEffect.blendingMode = .behindWindow
-            visualEffect.state = .active
-            visualEffect.autoresizingMask = [.width, .height]
-            rootView.addSubview(visualEffect)
-
-            // 2. Keep FlutterViewController alive in view hierarchy as a 1x1 sibling
-            // so gFFI, window_manager, and FlutterMultiWindowPlugin work natively
-            // without intercepting SwiftUI responder chain / TextField shortcuts.
-            containerVC.addChild(flutterViewController)
+            // Keep FlutterViewController alive in view hierarchy as a 1x1 hidden child
+            // so gFFI, window_manager, and FlutterMultiWindowPlugin stay bound to MainFlutterWindow
+            // without intercepting SwiftUI responder chain or resizing the window.
+            hostingController.addChild(flutterViewController)
             flutterViewController.view.frame = NSRect(x: 0, y: 0, width: 1, height: 1)
             flutterViewController.view.alphaValue = 0.001
-            rootView.addSubview(flutterViewController.view)
+            hostingController.view.addSubview(
+                flutterViewController.view,
+                positioned: .below,
+                relativeTo: nil
+            )
 
-            // 3. Genuine Apple Native SwiftUI iOS 26/27 Liquid Glass UI
-            let hostingView = NSHostingView(rootView: BbsLiquidGlassRootView(store: BbsNativeStore.shared))
-            hostingView.frame = rootView.bounds
-            hostingView.autoresizingMask = [.width, .height]
-            rootView.addSubview(hostingView)
-
-            self.contentViewController = containerVC
-            let initialSize = NSSize(width: max(windowFrame.width, 1060), height: max(windowFrame.height, 700))
+            let initialSize = NSSize(width: 1080, height: 700)
             self.setFrame(NSRect(origin: windowFrame.origin, size: initialSize), display: true)
             self.center()
         } else {

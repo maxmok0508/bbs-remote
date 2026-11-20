@@ -400,8 +400,19 @@ WindowOptions getHiddenTitleBarWindowOptions(
     Size? size,
     bool center = false,
     bool? alwaysOnTop}) {
+  // macOS main window is configured natively in MainFlutterWindow.swift with
+  // NSHostingController + NavigationSplitView + fullSizeContentView + unified toolbar.
+  // Passing null for titleBarStyle & backgroundColor prevents window_manager from
+  // removing .fullSizeContentView or altering macOS 26 Tahoe Liquid Glass chrome.
+  if (isMacOS && isMainWindow) {
+    return WindowOptions(
+      size: size,
+      center: center,
+      skipTaskbar: false,
+      alwaysOnTop: alwaysOnTop,
+    );
+  }
   var defaultTitleBarStyle = TitleBarStyle.hidden;
-  // we do not hide titlebar on win7 because of the frame overflow.
   if (kUseCompatibleUiMode) {
     defaultTitleBarStyle = TitleBarStyle.normal;
   }

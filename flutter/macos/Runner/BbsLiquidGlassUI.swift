@@ -2,7 +2,7 @@ import Cocoa
 import FlutterMacOS
 import SwiftUI
 
-// MARK: - Models
+// MARK: - Data Models
 
 struct BbsDeviceItem: Identifiable, Equatable {
     let id: String
@@ -43,7 +43,7 @@ struct BbsKeyRuleItem: Identifiable, Equatable {
     let isCustom: Bool
 }
 
-enum BbsNavTab: Int, CaseIterable, Identifiable {
+enum BbsNavTab: Int, CaseIterable, Identifiable, Hashable {
     case devices = 0
     case multiscreen = 1
     case keymap = 2
@@ -64,12 +64,23 @@ enum BbsNavTab: Int, CaseIterable, Identifiable {
         }
     }
 
+    var subtitle: String {
+        switch self {
+        case .devices: return "多通道不限并发 · 一键免密直连"
+        case .multiscreen: return "多屏控多屏 · 无线副屏 · 虚拟屏 · 隐私屏保"
+        case .keymap: return "Mac ⇄ Windows 双向实时映射引擎"
+        case .permissions: return "macOS 屏幕录制、辅助功能与后台守护"
+        case .settings: return "4K 原画 · 400Hz · 500Mbps · 真彩与 HDR"
+        case .assist: return "临时远程协助与 TCP 高速端口映射隧道"
+        }
+    }
+
     var symbol: String {
         switch self {
         case .devices: return "laptopcomputer.and.iphone"
         case .multiscreen: return "sparkles.tv"
-        case .keymap: return "keyboard.badge.ellipsis"
-        case .permissions: return "checkmark.shield.fill"
+        case .keymap: return "keyboard"
+        case .permissions: return "checkmark.shield"
         case .settings: return "slider.horizontal.3"
         case .assist: return "point.3.connected.trianglepath.dotted"
         }
@@ -84,7 +95,7 @@ final class BbsNativeStore: ObservableObject {
     private var channel: FlutterMethodChannel?
     private var didPrefillUser = false
 
-    @Published var selectedTab: BbsNavTab = .devices
+    @Published var selectedTab: BbsNavTab? = .devices
     @Published var isLogin: Bool = false
     @Published var userName: String = ""
     @Published var displayName: String = ""
@@ -127,11 +138,11 @@ final class BbsNativeStore: ObservableObject {
     @Published var privacyText: String = "正在远程安全办公中 · 请勿触碰设备"
     @Published var themeMode: String = "system"
 
-    // Key Mappings (540+ Mac & Windows)
+    // Key Mappings (544+ Mac & Windows)
     @Published var keyMasterEnabled: Bool = true
     @Published var activeKeyPreset: String = "smart_office"
     @Published var keyTotalCount: Int = 544
-    @Published var keyEnabledCount: Int = 180
+    @Published var keyEnabledCount: Int = 0
     @Published var keyPresets: [BbsKeyPresetItem] = []
     @Published var keyOptions: [BbsKeyOptionItem] = []
     @Published var keyRules: [BbsKeyRuleItem] = []
@@ -142,6 +153,9 @@ final class BbsNativeStore: ObservableObject {
     @Published var loggingIn: Bool = false
     @Published var loginError: String = ""
     @Published var toastMessage: String = ""
+    @Published var deviceSearchText: String = ""
+    @Published var keySearchText: String = ""
+    @Published var showingAddKeyModal: Bool = false
 
     var needsCorePermissions: Bool {
         !canScreenRecord || !canAccessibility
@@ -176,14 +190,27 @@ final class BbsNativeStore: ObservableObject {
         }
     }
 
+    func applyAppAppearance(_ mode: String) {
+        DispatchQueue.main.async {
+            switch mode {
+            case "light":
+                NSApp.appearance = NSAppearance(named: .aqua)
+            case "dark":
+                NSApp.appearance = NSAppearance(named: .darkAqua)
+            default:
+                NSApp.appearance = nil
+            }
+        }
+    }
+
     func showToast(_ msg: String) {
         DispatchQueue.main.async {
-            withAnimation(.spring(response: 0.32, dampingFraction: 0.8)) {
+            withAnimation(.spring(response: 0.30, dampingFraction: 0.82)) {
                 self.toastMessage = msg
             }
             DispatchQueue.main.asyncAfter(deadline: .now() + 2.4) { [weak self] in
                 guard let self = self, self.toastMessage == msg else { return }
-                withAnimation(.easeOut(duration: 0.25)) {
+                withAnimation(.easeOut(duration: 0.22)) {
                     self.toastMessage = ""
                 }
             }
@@ -221,7 +248,7 @@ final class BbsNativeStore: ObservableObject {
                 if (resp["ok"] as? Bool) == true {
                     self.loginInputPass = ""
                     self.selectedTab = .devices
-                    self.showToast("登录成功 · 已自动绑定本机免密直连")
+                    self.showToast("登录成功 · 已绑定本机免密直连")
                 } else {
                     self.loginError = (resp["error"] as? String) ?? "账号或密码错误"
                 }
@@ -241,15 +268,15 @@ final class BbsNativeStore: ObservableObject {
             return
         }
         if portForward {
-            showToast("正在打开高速端口映射隧道...")
+            showToast("正在打开 TCP 端口映射高速隧道...")
         } else if fileTransfer {
-            showToast("正在打开高速文件传输通道...")
+            showToast("正在打开高速文件传输...")
         } else if wirelessExt {
-            showToast("正在启动 144Hz 无线扩展副屏模式...")
+            showToast("正在启动 144Hz 无线扩展副屏...")
         } else if forceRelay || forceRelayDefault {
-            showToast("正在通过 500Mbps 专线中转通道连接...")
+            showToast("正在通过 500Mbps 专线中转连接...")
         } else {
-            showToast("正在建立多通道 P2P 高速直连...")
+            showToast("正在建立 P2P 高速直连...")
         }
         invoke("connectPeer", args: [
             "id": dev.id,
@@ -320,7 +347,7 @@ final class BbsNativeStore: ObservableObject {
             }
 
             if let s = root["settings"] as? [String: Any] {
-                self.imageQuality = (s["imageQuality"] as? String) ?? "best"
+                self.imageQuality = (s["imageQuality"] as? String) ?? "custom"
                 if let fps = s["customFps"] as? NSNumber {
                     self.customFps = fps.doubleValue
                 }
@@ -328,7 +355,7 @@ final class BbsNativeStore: ObservableObject {
                     self.customQuality = qual.doubleValue
                 }
                 self.codecPref = (s["codecPref"] as? String) ?? "auto"
-                self.viewStyle = (s["viewStyle"] as? String) ?? "adaptive"
+                self.viewStyle = (s["viewStyle"] as? String) ?? "original"
                 self.hwCodec = (s["hwCodec"] as? Bool) ?? true
                 self.showQualityMonitor = (s["showQualityMonitor"] as? Bool) ?? false
                 self.enableSound = (s["enableSound"] as? Bool) ?? true
@@ -342,7 +369,11 @@ final class BbsNativeStore: ObservableObject {
                 self.privacyStyle = (s["privacyStyle"] as? String) ?? "blackout"
                 let pt = (s["privacyText"] as? String) ?? ""
                 if !pt.isEmpty { self.privacyText = pt }
-                self.themeMode = (s["themeMode"] as? String) ?? "system"
+                let tm = (s["themeMode"] as? String) ?? "system"
+                if tm != self.themeMode {
+                    self.themeMode = tm
+                    self.applyAppAppearance(tm)
+                }
             }
 
             if let km = root["keyMapMeta"] as? [String: Any] {
@@ -403,223 +434,68 @@ final class BbsNativeStore: ObservableObject {
     }
 }
 
-// MARK: - Window Drag Header Helper (Conflict-free with Sliders & TextFields)
+// MARK: - Authentic Apple macOS 26 Tahoe NSGlassEffectView Surface
 
-private final class DraggableHeaderNSView: NSView {
-    override var mouseDownCanMoveWindow: Bool { true }
-    override func mouseDown(with event: NSEvent) {
-        window?.performDrag(with: event)
-    }
-}
+/// Uses Apple's real runtime `NSGlassEffectView` on macOS 26+ (Tahoe Liquid Glass),
+/// with automatic native `NSVisualEffectView` fallback on macOS 13–15.
+struct BbsNativeGlassBackground: NSViewRepresentable {
+    var cornerRadius: CGFloat = 18
+    var tint: NSColor? = nil
 
-struct BbsWindowDragArea: NSViewRepresentable {
     func makeNSView(context: Context) -> NSView {
-        let v = DraggableHeaderNSView()
-        v.wantsLayer = true
-        v.layer?.backgroundColor = NSColor.clear.cgColor
-        return v
+        if let glassClass = NSClassFromString("NSGlassEffectView") as? NSView.Type {
+            let view = glassClass.init(frame: .zero)
+            view.setValue(cornerRadius, forKey: "cornerRadius")
+            if let tint = tint {
+                view.setValue(tint, forKey: "tintColor")
+            }
+            return view
+        }
+        let vev = NSVisualEffectView(frame: .zero)
+        vev.material = .hudWindow
+        vev.blendingMode = .withinWindow
+        vev.state = .active
+        vev.wantsLayer = true
+        vev.layer?.cornerRadius = cornerRadius
+        vev.layer?.masksToBounds = true
+        return vev
     }
-    func updateNSView(_ nsView: NSView, context: Context) {}
-}
 
-// MARK: - iOS 26/27 Liquid Glass Modifiers & Components
-
-struct BbsLiquidGlassCard: ViewModifier {
-    let cornerRadius: CGFloat
-    let tint: Color?
-    @Environment(\.colorScheme) private var colorScheme
-
-    private var isDark: Bool { colorScheme == .dark }
-
-    func body(content: Content) -> some View {
-        content
-            .background(
-                ZStack {
-                    RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                        .fill(.ultraThinMaterial)
-
-                    if let tint = tint {
-                        RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                            .fill(tint)
-                    }
-
-                    RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                        .fill(
-                            LinearGradient(
-                                colors: [
-                                    Color.white.opacity(isDark ? 0.14 : 0.62),
-                                    Color.white.opacity(isDark ? 0.03 : 0.22),
-                                    Color.cyan.opacity(isDark ? 0.04 : 0.07)
-                                ],
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
-                            )
-                        )
-                }
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                    .strokeBorder(
-                        LinearGradient(
-                            colors: [
-                                Color.white.opacity(isDark ? 0.46 : 0.92),
-                                Color.cyan.opacity(isDark ? 0.28 : 0.35),
-                                Color.white.opacity(isDark ? 0.07 : 0.26),
-                                Color.indigo.opacity(isDark ? 0.24 : 0.18)
-                            ],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        ),
-                        lineWidth: 1.0
-                    )
-            )
-            .shadow(
-                color: Color.black.opacity(isDark ? 0.28 : 0.07),
-                radius: 20,
-                x: 0,
-                y: 10
-            )
+    func updateNSView(_ nsView: NSView, context: Context) {
+        if NSStringFromClass(type(of: nsView)) == "NSGlassEffectView" {
+            nsView.setValue(cornerRadius, forKey: "cornerRadius")
+            nsView.setValue(tint, forKey: "tintColor")
+        } else {
+            nsView.layer?.cornerRadius = cornerRadius
+        }
     }
 }
 
 extension View {
-    func liquidGlass(radius: CGFloat = 22, tint: Color? = nil) -> some View {
-        modifier(BbsLiquidGlassCard(cornerRadius: radius, tint: tint))
-    }
-}
-
-struct BbsLiquidAuroraBackdrop: View {
-    @Environment(\.colorScheme) private var colorScheme
-    private var isDark: Bool { colorScheme == .dark }
-
-    var body: some View {
-        GeometryReader { geo in
-            ZStack {
-                LinearGradient(
-                    colors: isDark
-                        ? [
-                            Color(red: 0.05, green: 0.08, blue: 0.15).opacity(0.78),
-                            Color(red: 0.07, green: 0.11, blue: 0.21).opacity(0.72),
-                            Color(red: 0.04, green: 0.07, blue: 0.14).opacity(0.82)
-                        ]
-                        : [
-                            Color(red: 0.92, green: 0.96, blue: 1.0).opacity(0.76),
-                            Color(red: 0.95, green: 0.97, blue: 1.0).opacity(0.70),
-                            Color(red: 0.90, green: 0.94, blue: 0.99).opacity(0.78)
-                        ],
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
-                )
-
-                Circle()
-                    .fill(
-                        RadialGradient(
-                            colors: [
-                                Color.cyan.opacity(isDark ? 0.26 : 0.28),
-                                Color.clear
-                            ],
-                            center: .center,
-                            startRadius: 10,
-                            endRadius: 280
-                        )
-                    )
-                    .frame(width: 540, height: 540)
-                    .offset(x: -geo.size.width * 0.28, y: -geo.size.height * 0.30)
-                    .blur(radius: 40)
-
-                Circle()
-                    .fill(
-                        RadialGradient(
-                            colors: [
-                                Color.indigo.opacity(isDark ? 0.28 : 0.22),
-                                Color.clear
-                            ],
-                            center: .center,
-                            startRadius: 10,
-                            endRadius: 300
-                        )
-                    )
-                    .frame(width: 580, height: 580)
-                    .offset(x: geo.size.width * 0.32, y: -geo.size.height * 0.20)
-                    .blur(radius: 50)
-
-                Circle()
-                    .fill(
-                        RadialGradient(
-                            colors: [
-                                Color(red: 0.12, green: 0.68, blue: 0.96).opacity(isDark ? 0.20 : 0.18),
-                                Color.clear
-                            ],
-                            center: .center,
-                            startRadius: 10,
-                            endRadius: 260
-                        )
-                    )
-                    .frame(width: 500, height: 500)
-                    .offset(x: geo.size.width * 0.18, y: geo.size.height * 0.34)
-                    .blur(radius: 45)
-            }
-        }
-        .ignoresSafeArea()
-    }
-}
-
-struct BbsLiquidActionButton: View {
-    let title: String
-    let symbol: String?
-    var prominent: Bool = true
-    var compact: Bool = false
-    let action: () -> Void
-
-    @State private var hovering = false
-
-    var body: some View {
-        Button(action: action) {
-            HStack(spacing: 6) {
-                if let symbol = symbol {
-                    Image(systemName: symbol)
-                        .font(.system(size: compact ? 12 : 13.5, weight: .semibold))
-                }
-                Text(title)
-                    .font(.system(size: compact ? 12.5 : 13.5, weight: .semibold))
-            }
-            .padding(.horizontal, compact ? 13 : 18)
-            .padding(.vertical, compact ? 7 : 9.5)
-            .foregroundStyle(prominent ? Color.white : Color.primary)
+    /// Floating Liquid Glass surface (for floating HUD pills / toasts) using Apple's runtime NSGlassEffectView.
+    func appleGlassCard(radius: CGFloat = 18, tint: NSColor? = nil) -> some View {
+        self
             .background(
-                Group {
-                    if prominent {
-                        Capsule(style: .continuous)
-                            .fill(
-                                LinearGradient(
-                                    colors: [
-                                        Color(red: 0.06, green: 0.62, blue: 0.98),
-                                        Color(red: 0.24, green: 0.42, blue: 0.96)
-                                    ],
-                                    startPoint: .topLeading,
-                                    endPoint: .bottomTrailing
-                                )
-                            )
-                            .overlay(
-                                Capsule(style: .continuous)
-                                    .strokeBorder(Color.white.opacity(0.45), lineWidth: 1)
-                            )
-                            .shadow(color: Color.cyan.opacity(hovering ? 0.42 : 0.25), radius: hovering ? 14 : 8, y: 4)
-                    } else {
-                        Capsule(style: .continuous)
-                            .fill(.thinMaterial)
-                            .overlay(
-                                Capsule(style: .continuous)
-                                    .strokeBorder(Color.white.opacity(0.32), lineWidth: 1)
-                            )
-                    }
-                }
+                BbsNativeGlassBackground(cornerRadius: radius, tint: tint)
             )
-            .scaleEffect(hovering ? 1.02 : 1.0)
-            .animation(.spring(response: 0.24, dampingFraction: 0.76), value: hovering)
-        }
-        .buttonStyle(.plain)
-        .onHover { hovering = $0 }
+            .clipShape(RoundedRectangle(cornerRadius: radius, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: radius, style: .continuous)
+                    .strokeBorder(Color.primary.opacity(0.08), lineWidth: 0.75)
+            )
+    }
+
+    /// Native macOS 26 Tahoe content-layer card surface (auto adapts to Light & Dark Mode, 120fps ScrollView).
+    func appleSurfaceCard(radius: CGFloat = 16) -> some View {
+        self
+            .background(
+                RoundedRectangle(cornerRadius: radius, style: .continuous)
+                    .fill(Color(nsColor: .controlBackgroundColor))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: radius, style: .continuous)
+                    .strokeBorder(Color.primary.opacity(0.09), lineWidth: 0.75)
+            )
     }
 }
 
@@ -628,57 +504,37 @@ struct BbsLiquidActionButton: View {
 struct BbsLiquidGlassRootView: View {
     @ObservedObject var store: BbsNativeStore
 
-    private var preferredScheme: ColorScheme? {
-        if store.themeMode == "light" { return .light }
-        if store.themeMode == "dark" { return .dark }
-        return nil
-    }
-
     var body: some View {
-        ZStack(alignment: .top) {
-            BbsLiquidAuroraBackdrop()
-
-            // Top invisible native window drag bar (leaves controls clickable below)
-            VStack(spacing: 0) {
-                BbsWindowDragArea()
-                    .frame(height: 34)
-                Spacer()
-            }
-            .ignoresSafeArea()
-
+        ZStack(alignment: .bottom) {
             if !store.isLogin {
-                BbsLiquidLoginView(store: store)
-                    .transition(.opacity.combined(with: .scale(scale: 0.98)))
+                BbsNativeLoginView(store: store)
             } else {
-                BbsLiquidWorkspaceView(store: store)
-                    .transition(.opacity)
+                BbsNativeSplitWorkspaceView(store: store)
             }
 
-            // Dynamic Island style Liquid Glass Toast
             if !store.toastMessage.isEmpty {
-                HStack(spacing: 9) {
-                    Image(systemName: "sparkles")
-                        .foregroundStyle(Color.cyan)
-                        .font(.system(size: 13, weight: .bold))
+                HStack(spacing: 8) {
+                    Image(systemName: "checkmark.circle.fill")
+                        .foregroundStyle(.tint)
                     Text(store.toastMessage)
-                        .font(.system(size: 13, weight: .semibold))
+                        .font(.callout.weight(.medium))
                 }
-                .padding(.horizontal, 18)
+                .padding(.horizontal, 16)
                 .padding(.vertical, 10)
-                .liquidGlass(radius: 24)
-                .padding(.top, 14)
-                .transition(.move(edge: .top).combined(with: .opacity))
-                .zIndex(99)
+                .appleGlassCard(radius: 22)
+                .shadow(color: .black.opacity(0.16), radius: 14, y: 6)
+                .padding(.bottom, 18)
+                .transition(.move(edge: .bottom).combined(with: .opacity))
+                .zIndex(100)
             }
         }
-        .frame(minWidth: 940, minHeight: 620)
-        .preferredColorScheme(preferredScheme)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }
 
-// MARK: - 1. Liquid Glass Login Screen
+// MARK: - 1. Native macOS Login View
 
-struct BbsLiquidLoginView: View {
+struct BbsNativeLoginView: View {
     @ObservedObject var store: BbsNativeStore
 
     var body: some View {
@@ -686,427 +542,232 @@ struct BbsLiquidLoginView: View {
             Spacer()
 
             VStack(spacing: 20) {
-                // Brand Squircle Icon
-                ZStack {
-                    RoundedRectangle(cornerRadius: 22, style: .continuous)
-                        .fill(
-                            LinearGradient(
-                                colors: [Color.cyan.opacity(0.35), Color.indigo.opacity(0.35)],
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
-                            )
-                        )
-                        .frame(width: 76, height: 76)
-                        .blur(radius: 12)
+                Image(nsImage: NSApplication.shared.applicationIconImage)
+                    .resizable()
+                    .interpolation(.high)
+                    .frame(width: 72, height: 72)
+                    .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                    .shadow(color: .black.opacity(0.15), radius: 10, y: 4)
 
-                    Image(nsImage: NSApplication.shared.applicationIconImage)
-                        .resizable()
-                        .interpolation(.high)
-                        .frame(width: 72, height: 72)
-                        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                                .strokeBorder(Color.white.opacity(0.55), lineWidth: 1)
-                        )
-                }
-
-                VStack(spacing: 5) {
+                VStack(spacing: 4) {
                     Text("BBS-Remote")
-                        .font(.system(size: 26, weight: .bold, design: .rounded))
-                    Text("iOS 27 液态玻璃原生架构 · 400FPS 专线一键远控")
-                        .font(.system(size: 12.5, weight: .medium))
+                        .font(.title.bold())
+                    Text("登录专属账号，一键免密高速远控")
+                        .font(.subheadline)
                         .foregroundStyle(.secondary)
                 }
 
                 VStack(spacing: 12) {
-                    HStack(spacing: 10) {
-                        Image(systemName: "person.crop.circle.fill")
-                            .foregroundStyle(.secondary)
-                            .font(.system(size: 16))
-                        TextField("请输入管理员开通的专属账号", text: $store.loginInputUser)
-                            .textFieldStyle(.plain)
-                            .font(.system(size: 14))
-                            .onSubmit { store.performLogin() }
-                    }
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 11)
-                    .background(
-                        RoundedRectangle(cornerRadius: 14, style: .continuous)
-                            .fill(Color.primary.opacity(0.05))
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 14, style: .continuous)
-                                    .strokeBorder(Color.white.opacity(0.24), lineWidth: 1)
-                            )
-                    )
+                    TextField("管理员分配的专属账号", text: $store.loginInputUser)
+                        .textFieldStyle(.roundedBorder)
+                        .controlSize(.large)
+                        .onSubmit { store.performLogin() }
 
-                    HStack(spacing: 10) {
-                        Image(systemName: "lock.circle.fill")
-                            .foregroundStyle(.secondary)
-                            .font(.system(size: 16))
-                        SecureField("请输入登录密码", text: $store.loginInputPass)
-                            .textFieldStyle(.plain)
-                            .font(.system(size: 14))
-                            .onSubmit { store.performLogin() }
-                    }
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 11)
-                    .background(
-                        RoundedRectangle(cornerRadius: 14, style: .continuous)
-                            .fill(Color.primary.opacity(0.05))
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 14, style: .continuous)
-                                    .strokeBorder(Color.white.opacity(0.24), lineWidth: 1)
-                            )
-                    )
+                    SecureField("登录密码", text: $store.loginInputPass)
+                        .textFieldStyle(.roundedBorder)
+                        .controlSize(.large)
+                        .onSubmit { store.performLogin() }
                 }
 
                 if !store.loginError.isEmpty {
-                    HStack(spacing: 6) {
-                        Image(systemName: "exclamationmark.triangle.fill")
-                            .foregroundStyle(.red)
-                        Text(store.loginError)
-                            .font(.system(size: 12.5, weight: .medium))
-                            .foregroundStyle(.red)
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 8)
-                    .background(
-                        RoundedRectangle(cornerRadius: 10, style: .continuous)
-                            .fill(Color.red.opacity(0.12))
-                    )
+                    Label(store.loginError, systemImage: "exclamationmark.triangle.fill")
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                        .frame(maxWidth: .infinity, alignment: .leading)
                 }
 
                 Button(action: { store.performLogin() }) {
-                    HStack(spacing: 8) {
+                    HStack(spacing: 6) {
                         if store.loggingIn {
-                            ProgressView()
-                                .controlSize(.small)
-                                .tint(.white)
-                        } else {
-                            Image(systemName: "bolt.horizontal.circle.fill")
-                                .font(.system(size: 16, weight: .semibold))
+                            ProgressView().controlSize(.small)
                         }
-                        Text(store.loggingIn ? "正在安全认证..." : "立即登录并绑定本机")
-                            .font(.system(size: 15, weight: .bold))
+                        Text(store.loggingIn ? "正在认证..." : "立即登录并绑定本机")
+                            .frame(maxWidth: .infinity)
                     }
-                    .foregroundStyle(.white)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 12)
-                    .background(
-                        Capsule(style: .continuous)
-                            .fill(
-                                LinearGradient(
-                                    colors: [
-                                        Color(red: 0.05, green: 0.62, blue: 0.98),
-                                        Color(red: 0.26, green: 0.40, blue: 0.96)
-                                    ],
-                                    startPoint: .leading,
-                                    endPoint: .trailing
-                                )
-                            )
-                            .overlay(
-                                Capsule(style: .continuous)
-                                    .strokeBorder(Color.white.opacity(0.45), lineWidth: 1)
-                            )
-                            .shadow(color: Color.cyan.opacity(0.32), radius: 14, y: 6)
-                    )
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.borderedProminent)
+                .controlSize(.large)
                 .disabled(store.loggingIn)
 
-                HStack(spacing: 7) {
+                HStack(spacing: 6) {
                     Circle()
                         .fill(store.svcReady ? Color.green : Color.orange)
-                        .frame(width: 8, height: 8)
-                        .shadow(color: (store.svcReady ? Color.green : Color.orange).opacity(0.6), radius: 5)
-                    Text(store.svcReady ? "专线信令与 P2P 通道已就绪 · 本机识别码 \(store.formattedMyId)" : "正在连接专属高速节点...")
-                        .font(.system(size: 11.5, weight: .medium))
+                        .frame(width: 7, height: 7)
+                    Text(store.svcReady ? "专线与 P2P 通道就绪 · 本机 ID \(store.formattedMyId)" : "正在连接节点...")
+                        .font(.caption)
                         .foregroundStyle(.secondary)
                 }
             }
-            .padding(34)
-            .frame(width: 420)
-            .liquidGlass(radius: 30)
+            .padding(28)
+            .frame(width: 380)
+            .appleSurfaceCard(radius: 24)
+            .shadow(color: .black.opacity(0.14), radius: 22, y: 10)
 
             Spacer()
 
             if store.isDmgVolume {
                 BbsDmgBannerView(store: store)
-                    .padding(.horizontal, 28)
-                    .padding(.bottom, 18)
+                    .padding(.horizontal, 24)
+                    .padding(.bottom, 16)
             }
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Color(nsColor: .windowBackgroundColor))
+        .navigationTitle("BBS-Remote")
+        .navigationSubtitle("")
     }
 }
 
-// MARK: - 2. Main Liquid Glass Workspace
+// MARK: - 2. Authentic Native macOS 26 Tahoe NavigationSplitView Workspace
 
-struct BbsLiquidWorkspaceView: View {
+struct BbsNativeSplitWorkspaceView: View {
     @ObservedObject var store: BbsNativeStore
+    @State private var columnVisibility: NavigationSplitViewVisibility = .all
 
-    var body: some View {
-        HStack(spacing: 16) {
-            // Floating Liquid Glass Sidebar
-            BbsLiquidSidebar(store: store)
-                .frame(width: 236)
-
-            // Active Content Pane
-            VStack(spacing: 12) {
-                if store.isDmgVolume {
-                    BbsDmgBannerView(store: store)
-                }
-                if store.selectedTab == .devices && store.needsCorePermissions && !store.permDismissed {
-                    BbsPermQuickBanner(store: store)
-                }
-
-                Group {
-                    switch store.selectedTab {
-                    case .devices:
-                        BbsMyDevicesPage(store: store)
-                    case .multiscreen:
-                        BbsMultiScreenPrivacyPage(store: store)
-                    case .keymap:
-                        BbsKeyMappingPage(store: store)
-                    case .permissions:
-                        BbsPermissionsPage(store: store)
-                    case .settings:
-                        BbsSettingsPage(store: store)
-                    case .assist:
-                        BbsManualAssistPage(store: store)
-                    }
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-            }
-        }
-        .padding(.top, 16)
-        .padding(.bottom, 16)
-        .padding(.horizontal, 16)
+    private var activeTab: BbsNavTab {
+        store.selectedTab ?? .devices
     }
-}
-
-struct BbsLiquidSidebar: View {
-    @ObservedObject var store: BbsNativeStore
-    @Namespace private var navNamespace
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            // Reserve top space for macOS native traffic light buttons
-            Spacer().frame(height: 22)
+        NavigationSplitView(columnVisibility: $columnVisibility) {
+            List(selection: $store.selectedTab) {
+                Section("远程控制") {
+                    Label("我的设备", systemImage: BbsNavTab.devices.symbol)
+                        .badge(store.devices.isEmpty ? 0 : store.onlineDeviceCount)
+                        .tag(BbsNavTab.devices)
 
-            // App Brand Header
-            HStack(spacing: 11) {
-                Image(nsImage: NSApplication.shared.applicationIconImage)
-                    .resizable()
-                    .interpolation(.high)
-                    .frame(width: 40, height: 40)
-                    .clipShape(RoundedRectangle(cornerRadius: 11, style: .continuous))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 11, style: .continuous)
-                            .strokeBorder(Color.white.opacity(0.45), lineWidth: 1)
-                    )
+                    Label("多屏与隐私", systemImage: BbsNavTab.multiscreen.symbol)
+                        .tag(BbsNavTab.multiscreen)
 
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("BBS-Remote")
-                        .font(.system(size: 16, weight: .bold, design: .rounded))
-                    HStack(spacing: 5) {
-                        Circle()
-                            .fill(store.svcReady ? Color.green : Color.orange)
-                            .frame(width: 7, height: 7)
-                        Text(store.svcReady ? "P2P · 400Hz 就绪" : "节点重连中")
-                            .font(.system(size: 11, weight: .medium))
-                            .foregroundStyle(.secondary)
-                    }
+                    Label("按键映射", systemImage: BbsNavTab.keymap.symbol)
+                        .badge(store.keyTotalCount)
+                        .tag(BbsNavTab.keymap)
+                }
+
+                Section("系统与网络") {
+                    Label("本机权限", systemImage: BbsNavTab.permissions.symbol)
+                        .badge(store.needsCorePermissions ? "待开启" : "就绪")
+                        .tag(BbsNavTab.permissions)
+
+                    Label("设置中心", systemImage: BbsNavTab.settings.symbol)
+                        .tag(BbsNavTab.settings)
+
+                    Label("协助与端口", systemImage: BbsNavTab.assist.symbol)
+                        .tag(BbsNavTab.assist)
                 }
             }
-            .padding(.horizontal, 6)
-
-            Divider().opacity(0.35)
-
-            // Liquid Glass Navigation Capsules
-            VStack(spacing: 6) {
-                ForEach(BbsNavTab.allCases) { tab in
-                    let selected = store.selectedTab == tab
-                    Button {
-                        withAnimation(.spring(response: 0.30, dampingFraction: 0.80)) {
-                            store.selectedTab = tab
-                        }
-                    } label: {
-                        HStack(spacing: 10) {
-                            Image(systemName: tab.symbol)
-                                .font(.system(size: 14.5, weight: .semibold))
-                                .frame(width: 22)
-                                .foregroundStyle(selected ? Color.white : Color.primary.opacity(0.82))
-
-                            Text(tab.title)
-                                .font(.system(size: 13.5, weight: selected ? .bold : .medium))
-                                .foregroundStyle(selected ? Color.white : Color.primary.opacity(0.88))
-
-                            Spacer()
-
-                            navTrailingBadge(for: tab, selected: selected)
-                        }
-                        .padding(.horizontal, 13)
-                        .padding(.vertical, 10)
-                        .background(
-                            ZStack {
-                                if selected {
-                                    RoundedRectangle(cornerRadius: 14, style: .continuous)
-                                        .fill(
-                                            LinearGradient(
-                                                colors: [
-                                                    Color(red: 0.06, green: 0.60, blue: 0.97),
-                                                    Color(red: 0.27, green: 0.41, blue: 0.95)
-                                                ],
-                                                startPoint: .topLeading,
-                                                endPoint: .bottomTrailing
-                                            )
-                                        )
-                                        .overlay(
-                                            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                                                .strokeBorder(Color.white.opacity(0.42), lineWidth: 1)
-                                        )
-                                        .shadow(color: Color.cyan.opacity(0.28), radius: 10, y: 4)
-                                        .matchedGeometryEffect(id: "ACTIVE_NAV_PILL", in: navNamespace)
-                                }
+            .listStyle(.sidebar)
+            .navigationSplitViewColumnWidth(min: 200, ideal: 224, max: 260)
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                VStack(alignment: .leading, spacing: 8) {
+                    Divider()
+                    HStack(spacing: 8) {
+                        Image(nsImage: NSApplication.shared.applicationIconImage)
+                            .resizable()
+                            .frame(width: 28, height: 28)
+                            .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text(store.displayName.isEmpty ? store.userName : store.displayName)
+                                .font(.callout.weight(.semibold))
+                                .lineLimit(1)
+                            HStack(spacing: 4) {
+                                Circle()
+                                    .fill(store.svcReady ? Color.green : Color.orange)
+                                    .frame(width: 6, height: 6)
+                                Text(store.formattedMyId)
+                                    .font(.caption2.monospaced())
+                                    .foregroundStyle(.secondary)
                             }
+                        }
+                        Spacer()
+                        Button {
+                            NSPasteboard.general.clearContents()
+                            NSPasteboard.general.setString(store.myId, forType: .string)
+                            store.showToast("已复制本机 ID：\(store.formattedMyId)")
+                        } label: {
+                            Image(systemName: "doc.on.doc")
+                        }
+                        .buttonStyle(.borderless)
+                        .help("复制本机 ID")
+
+                        Button {
+                            store.invoke("logout")
+                            store.showToast("已退出登录")
+                        } label: {
+                            Image(systemName: "rectangle.portrait.and.arrow.right")
+                        }
+                        .buttonStyle(.borderless)
+                        .help("退出登录")
+                    }
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 10)
+                }
+            }
+        } detail: {
+            Group {
+                switch activeTab {
+                case .devices:
+                    BbsMyDevicesPage(store: store)
+                case .multiscreen:
+                    BbsMultiScreenPrivacyPage(store: store)
+                case .keymap:
+                    BbsKeyMappingPage(store: store)
+                case .permissions:
+                    BbsPermissionsPage(store: store)
+                case .settings:
+                    BbsSettingsPage(store: store)
+                case .assist:
+                    BbsManualAssistPage(store: store)
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .navigationTitle(activeTab.title)
+            .navigationSubtitle(activeTab.subtitle)
+            .toolbar {
+                ToolbarItemGroup(placement: .primaryAction) {
+                    if activeTab == .devices {
+                        Button {
+                            store.invoke("refreshDevices")
+                            store.showToast("已刷新设备在线状态")
+                        } label: {
+                            Label("刷新设备", systemImage: "arrow.clockwise")
+                        }
+                        .help("刷新在线设备")
+                    } else if activeTab == .keymap {
+                        Button {
+                            store.showingAddKeyModal = true
+                        } label: {
+                            Label("新增映射", systemImage: "plus")
+                        }
+                        .help("新增自定义按键映射")
+                    }
+
+                    Menu {
+                        Button {
+                            store.forceRelayDefault = false
+                            store.invoke("updateSetting", args: ["key": "forceRelayDefault", "value": false])
+                            store.showToast("已切换为 P2P 智能直连优先")
+                        } label: {
+                            Label("P2P 智能直连优先", systemImage: store.forceRelayDefault ? "" : "checkmark")
+                        }
+                        Button {
+                            store.forceRelayDefault = true
+                            store.invoke("updateSetting", args: ["key": "forceRelayDefault", "value": true])
+                            store.showToast("已切换为全局 500Mbps 专线中转")
+                        } label: {
+                            Label("手动强制 500Mbps 专线中转", systemImage: store.forceRelayDefault ? "checkmark" : "")
+                        }
+                    } label: {
+                        Label(
+                            store.forceRelayDefault ? "专线中转" : "P2P 直连",
+                            systemImage: store.forceRelayDefault ? "arrow.triangle.branch" : "bolt.horizontal.fill"
                         )
-                        .contentShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
                     }
-                    .buttonStyle(.plain)
+                    .help("切换默认连接通道（P2P 直连 / 手动中转）")
                 }
             }
-
-            Spacer()
-
-            // Local ID & Logged-in Account Capsule
-            VStack(alignment: .leading, spacing: 10) {
-                HStack(spacing: 9) {
-                    ZStack {
-                        Circle()
-                            .fill(
-                                LinearGradient(
-                                    colors: [Color.cyan, Color.indigo],
-                                    startPoint: .topLeading,
-                                    endPoint: .bottomTrailing
-                                )
-                            )
-                            .frame(width: 34, height: 34)
-                        Text(String((store.displayName.isEmpty ? "U" : store.displayName).prefix(1)).uppercased())
-                            .font(.system(size: 14, weight: .bold))
-                            .foregroundStyle(.white)
-                    }
-
-                    VStack(alignment: .leading, spacing: 1) {
-                        Text(store.displayName.isEmpty ? store.userName : store.displayName)
-                            .font(.system(size: 13, weight: .bold))
-                            .lineLimit(1)
-                        Text("@\(store.userName) · 免密已激活")
-                            .font(.system(size: 11))
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1)
-                    }
-
-                    Spacer()
-
-                    Button {
-                        store.invoke("logout")
-                        store.showToast("已安全退出当前账号")
-                    } label: {
-                        Image(systemName: "rectangle.portrait.and.arrow.right")
-                            .font(.system(size: 13, weight: .semibold))
-                            .foregroundStyle(.secondary)
-                            .padding(6)
-                            .background(Circle().fill(Color.primary.opacity(0.07)))
-                    }
-                    .buttonStyle(.plain)
-                    .help("退出登录")
-                }
-
-                Divider().opacity(0.25)
-
-                HStack {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("本机识别码")
-                            .font(.system(size: 10.5, weight: .medium))
-                            .foregroundStyle(.secondary)
-                        Text(store.formattedMyId)
-                            .font(.system(size: 13, weight: .bold, design: .monospaced))
-                    }
-                    Spacer()
-                    Button {
-                        NSPasteboard.general.clearContents()
-                        NSPasteboard.general.setString(store.myId, forType: .string)
-                        store.showToast("已复制本机识别码 \(store.formattedMyId)")
-                    } label: {
-                        Image(systemName: "doc.on.doc")
-                            .font(.system(size: 12, weight: .semibold))
-                            .padding(6)
-                            .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(Color.primary.opacity(0.07)))
-                    }
-                    .buttonStyle(.plain)
-                    .help("复制本机识别码")
-                }
-            }
-            .padding(12)
-            .background(
-                RoundedRectangle(cornerRadius: 18, style: .continuous)
-                    .fill(Color.primary.opacity(0.045))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 18, style: .continuous)
-                            .strokeBorder(Color.white.opacity(0.22), lineWidth: 1)
-                    )
-            )
         }
-        .padding(14)
-        .liquidGlass(radius: 26)
-    }
-
-    @ViewBuilder
-    private func navTrailingBadge(for tab: BbsNavTab, selected: Bool) -> some View {
-        switch tab {
-        case .devices:
-            if !store.devices.isEmpty {
-                Text("\(store.onlineDeviceCount)/\(store.devices.count)")
-                    .font(.system(size: 10.5, weight: .bold, design: .rounded))
-                    .padding(.horizontal, 7)
-                    .padding(.vertical, 2)
-                    .foregroundStyle(selected ? Color.white : Color.cyan)
-                    .background(
-                        Capsule().fill(selected ? Color.white.opacity(0.22) : Color.cyan.opacity(0.15))
-                    )
-            }
-        case .multiscreen:
-            Text("满血")
-                .font(.system(size: 10, weight: .bold, design: .rounded))
-                .padding(.horizontal, 6.5)
-                .padding(.vertical, 2)
-                .foregroundStyle(selected ? Color.white : Color.indigo)
-                .background(
-                    Capsule().fill(selected ? Color.white.opacity(0.22) : Color.indigo.opacity(0.16))
-                )
-        case .keymap:
-            Text("\(store.keyTotalCount)+")
-                .font(.system(size: 10.5, weight: .bold, design: .rounded))
-                .padding(.horizontal, 7)
-                .padding(.vertical, 2)
-                .foregroundStyle(selected ? Color.white : Color.cyan)
-                .background(
-                    Capsule().fill(selected ? Color.white.opacity(0.22) : Color.cyan.opacity(0.15))
-                )
-        case .permissions:
-            if store.needsCorePermissions {
-                Circle()
-                    .fill(Color.orange)
-                    .frame(width: 8, height: 8)
-            } else {
-                Image(systemName: "checkmark.circle.fill")
-                    .font(.system(size: 13))
-                    .foregroundStyle(selected ? Color.white : Color.green)
-            }
-        default:
-            EmptyView()
-        }
+        .navigationSplitViewStyle(.balanced)
     }
 }
 
@@ -1118,18 +779,20 @@ struct BbsDmgBannerView: View {
     var body: some View {
         HStack(spacing: 12) {
             Image(systemName: "arrow.down.app.fill")
-                .font(.system(size: 18))
-                .foregroundStyle(.cyan)
-            Text("当前正在磁盘镜像内运行，建议一键移入「应用程序」以保持系统权限长期有效")
-                .font(.system(size: 12.5, weight: .medium))
+                .font(.title3)
+                .foregroundStyle(.tint)
+            Text("当前正在磁盘映像内运行，建议移入「应用程序」以保持系统权限持久有效")
+                .font(.callout)
             Spacer()
-            BbsLiquidActionButton(title: "一键安装到应用程序", symbol: "sparkles", compact: true) {
+            Button("一键安装到应用程序") {
                 store.invoke("installToApps")
             }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.small)
         }
-        .padding(.horizontal, 16)
+        .padding(.horizontal, 14)
         .padding(.vertical, 10)
-        .liquidGlass(radius: 16, tint: Color.cyan.opacity(0.10))
+        .appleSurfaceCard(radius: 14)
     }
 }
 
@@ -1138,45 +801,43 @@ struct BbsPermQuickBanner: View {
 
     var body: some View {
         HStack(spacing: 10) {
-            Image(systemName: "hand.raised.circle.fill")
-                .font(.system(size: 18))
+            Image(systemName: "exclamationmark.shield.fill")
                 .foregroundStyle(.orange)
-            Text("本机尚未完成屏幕录制或辅助功能授权，其他电脑远控本机时可能无法显示画面或控制键鼠")
-                .font(.system(size: 12.5, weight: .medium))
-                .lineLimit(1)
+            Text("本机尚未开启屏幕录制或辅助功能权限，其他设备远控本机时可能无法看到画面或操作鼠标")
+                .font(.callout)
+                .lineLimit(2)
             Spacer()
-            BbsLiquidActionButton(title: "前往配置权限", symbol: "checkmark.shield", compact: true) {
+            Button("去开启") {
                 store.selectedTab = .permissions
             }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.small)
+
             Button {
                 store.invoke("dismissPermBanner")
             } label: {
                 Image(systemName: "xmark")
-                    .font(.system(size: 11, weight: .bold))
-                    .foregroundStyle(.secondary)
-                    .padding(6)
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.borderless)
         }
-        .padding(.horizontal, 16)
+        .padding(.horizontal, 14)
         .padding(.vertical, 10)
-        .liquidGlass(radius: 16, tint: Color.orange.opacity(0.10))
+        .appleSurfaceCard(radius: 14)
     }
 }
 
-// MARK: - Page 1: My Devices (一键免密远程)
+// MARK: - Page 1: My Devices (Responsive Adaptive Grid + Native Liquid Glass Cards)
 
 struct BbsMyDevicesPage: View {
     @ObservedObject var store: BbsNativeStore
-    @State private var searchText: String = ""
     @State private var renamingDevice: BbsDeviceItem?
     @State private var renameText: String = ""
     @State private var deletingDevice: BbsDeviceItem?
 
     private var filteredDevices: [BbsDeviceItem] {
-        let q = searchText.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let q = store.deviceSearchText.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         let sorted = store.devices.sorted { a, b in
-            if a.isSelf != b.isSelf { return !a.isSelf } // Put remote devices first for 1-click access
+            if a.isSelf != b.isSelf { return !a.isSelf }
             if a.online != b.online { return a.online }
             return a.displayName.localizedCaseInsensitiveCompare(b.displayName) == .orderedAscending
         }
@@ -1190,128 +851,86 @@ struct BbsMyDevicesPage: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            // Header + Search Capsule
-            HStack(spacing: 12) {
-                VStack(alignment: .leading, spacing: 3) {
-                    Text("我的设备")
-                        .font(.system(size: 24, weight: .bold, design: .rounded))
-                    Text("同一账号下设备自动同步，点击「一键远程」毫秒级免密直连，支持远程直接操控对端 BBS-Remote")
-                        .font(.system(size: 12, weight: .medium))
-                        .foregroundStyle(.secondary)
+        ScrollView {
+            VStack(alignment: .leading, spacing: 14) {
+                if store.isDmgVolume {
+                    BbsDmgBannerView(store: store)
+                }
+                if store.needsCorePermissions && !store.permDismissed {
+                    BbsPermQuickBanner(store: store)
                 }
 
-                Spacer()
-
-                HStack(spacing: 8) {
-                    Image(systemName: "magnifyingglass")
-                        .foregroundStyle(.secondary)
-                        .font(.system(size: 13))
-                    TextField("搜索设备名或 ID...", text: $searchText)
-                        .textFieldStyle(.plain)
-                        .font(.system(size: 13))
-                        .frame(width: 170)
-                    if !searchText.isEmpty {
-                        Button {
-                            searchText = ""
-                        } label: {
-                            Image(systemName: "xmark.circle.fill")
-                                .foregroundStyle(.secondary)
-                        }
-                        .buttonStyle(.plain)
-                    }
-                }
-                .padding(.horizontal, 12)
-                .padding(.vertical, 8)
-                .liquidGlass(radius: 18)
-
-                BbsLiquidActionButton(title: "刷新列表", symbol: "arrow.clockwise", prominent: false, compact: true) {
-                    store.invoke("refreshDevices")
-                    store.showToast("已同步最新设备在线状态")
-                }
-            }
-            .padding(.top, 6)
-
-            // Local Machine Status Strip
-            HStack(spacing: 14) {
-                ZStack {
-                    RoundedRectangle(cornerRadius: 14, style: .continuous)
-                        .fill(
-                            LinearGradient(
-                                colors: [Color.cyan.opacity(0.28), Color.blue.opacity(0.22)],
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
-                            )
-                        )
-                        .frame(width: 46, height: 46)
+                // Local Host Summary Glass Card
+                HStack(spacing: 14) {
                     Image(systemName: "desktopcomputer")
-                        .font(.system(size: 20, weight: .semibold))
-                        .foregroundStyle(.cyan)
-                }
+                        .font(.title2)
+                        .foregroundStyle(.tint)
+                        .frame(width: 42, height: 42)
+                        .background(Color.accentColor.opacity(0.12), in: RoundedRectangle(cornerRadius: 11, style: .continuous))
 
-                VStack(alignment: .leading, spacing: 3) {
-                    HStack(spacing: 8) {
-                        Text(store.myHostname.isEmpty ? "当前 Mac 设备" : store.myHostname)
-                            .font(.system(size: 15, weight: .bold))
-                        Text("本机 · 免密被控已就绪")
-                            .font(.system(size: 10.5, weight: .bold))
-                            .padding(.horizontal, 8)
-                            .padding(.vertical, 2.5)
-                            .foregroundStyle(.cyan)
-                            .background(Capsule().fill(Color.cyan.opacity(0.16)))
-                        if store.videoConnCount > 0 {
-                            Text("正在被远控 (\(store.videoConnCount))")
-                                .font(.system(size: 10.5, weight: .bold))
-                                .padding(.horizontal, 8)
-                                .padding(.vertical, 2.5)
-                                .foregroundStyle(.green)
-                                .background(Capsule().fill(Color.green.opacity(0.18)))
+                    VStack(alignment: .leading, spacing: 3) {
+                        HStack(spacing: 8) {
+                            Text(store.myHostname.isEmpty ? "当前 Mac" : store.myHostname)
+                                .font(.headline)
+                            Text("本机")
+                                .font(.caption2.weight(.semibold))
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 2)
+                                .background(Color.accentColor.opacity(0.14), in: Capsule())
+                                .foregroundStyle(.tint)
+                            if store.videoConnCount > 0 {
+                                Text("远控连接中 (\(store.videoConnCount))")
+                                    .font(.caption2.weight(.semibold))
+                                    .padding(.horizontal, 6)
+                                    .padding(.vertical, 2)
+                                    .background(Color.green.opacity(0.16), in: Capsule())
+                                    .foregroundStyle(.green)
+                            }
                         }
+                        Text("识别码 \(store.formattedMyId) · 4K 400Hz · 500Mbps · 多通道免密被控就绪")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
                     }
-                    Text("设备识别码：\(store.formattedMyId)  ·  支持 P2P 打洞直连与 400FPS 超高帧率")
-                        .font(.system(size: 12))
-                        .foregroundStyle(.secondary)
+
+                    Spacer()
+
+                    Button {
+                        NSPasteboard.general.clearContents()
+                        NSPasteboard.general.setString(store.myId, forType: .string)
+                        store.showToast("已复制本机 ID：\(store.formattedMyId)")
+                    } label: {
+                        Label("复制 ID", systemImage: "doc.on.doc")
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.regular)
                 }
+                .padding(14)
+                .appleSurfaceCard(radius: 16)
 
-                Spacer()
-
-                BbsLiquidActionButton(title: "复制本机 ID", symbol: "doc.on.doc", prominent: false, compact: true) {
-                    NSPasteboard.general.clearContents()
-                    NSPasteboard.general.setString(store.myId, forType: .string)
-                    store.showToast("已复制本机 ID：\(store.formattedMyId)")
-                }
-            }
-            .padding(16)
-            .liquidGlass(radius: 20)
-
-            // Device Grid
-            ScrollView {
+                // Responsive Device Grid (adapts smoothly to 1, 2, or 3 columns!)
                 if filteredDevices.isEmpty {
-                    VStack(spacing: 12) {
+                    VStack(spacing: 10) {
                         Image(systemName: "laptopcomputer.slash")
-                            .font(.system(size: 40))
-                            .foregroundStyle(.secondary.opacity(0.6))
-                        Text("暂无匹配的绑定设备")
-                            .font(.system(size: 15, weight: .semibold))
-                        Text("在另一台 Mac 或 Windows 电脑登录同一账号，即可在此一键免密远控")
-                            .font(.system(size: 12.5))
+                            .font(.largeTitle)
+                            .foregroundStyle(.secondary)
+                        Text("暂无匹配的设备")
+                            .font(.headline)
+                        Text("在另一台 Mac 或 Windows 登录同一账号，即可在此一键免密远控")
+                            .font(.callout)
                             .foregroundStyle(.secondary)
                     }
                     .frame(maxWidth: .infinity)
-                    .padding(.vertical, 70)
-                    .liquidGlass(radius: 22)
+                    .padding(.vertical, 64)
+                    .appleSurfaceCard(radius: 18)
                 } else {
                     LazyVGrid(
-                        columns: [
-                            GridItem(.flexible(minimum: 300), spacing: 14),
-                            GridItem(.flexible(minimum: 300), spacing: 14)
-                        ],
+                        columns: [GridItem(.adaptive(minimum: 320, maximum: 540), spacing: 14)],
                         spacing: 14
                     ) {
                         ForEach(filteredDevices) { dev in
                             BbsDeviceGlassCard(
                                 dev: dev,
-                                onConnect: { store.connectPeer(dev, fileTransfer: false) },
+                                onConnect: { store.connectPeer(dev) },
                                 onRelayConnect: { store.connectPeer(dev, forceRelay: true) },
                                 onWirelessExt: { store.connectPeer(dev, wirelessExt: true) },
                                 onTransfer: { store.connectPeer(dev, fileTransfer: true) },
@@ -1324,49 +943,48 @@ struct BbsMyDevicesPage: View {
                             )
                         }
                     }
-                    .padding(.vertical, 2)
                 }
             }
-            .scrollContentBackground(.hidden)
+            .padding(18)
         }
+        .searchable(text: $store.deviceSearchText, placement: .toolbar, prompt: "搜索设备名称或 ID")
         .sheet(item: $renamingDevice) { dev in
-            VStack(alignment: .leading, spacing: 16) {
-                Text("修改设备备注名称")
-                    .font(.system(size: 17, weight: .bold))
-                TextField("例如：办公室 MacBook Pro / 家里电竞主机", text: $renameText)
+            VStack(alignment: .leading, spacing: 14) {
+                Text("修改设备备注名称").font(.headline)
+                TextField("如：办公室 MacBook Pro / 家里主力机", text: $renameText)
                     .textFieldStyle(.roundedBorder)
-                    .frame(width: 340)
+                    .frame(width: 320)
                 HStack {
                     Spacer()
                     Button("取消") { renamingDevice = nil }
-                    BbsLiquidActionButton(title: "保存备注", symbol: "checkmark", compact: true) {
+                    Button("保存") {
                         store.invoke("renamePeer", args: ["id": dev.id, "alias": renameText])
-                        store.showToast("已更新设备备注名称")
+                        store.showToast("已更新设备备注")
                         renamingDevice = nil
                     }
+                    .buttonStyle(.borderedProminent)
                 }
             }
-            .padding(24)
+            .padding(20)
         }
         .sheet(item: $deletingDevice) { dev in
-            VStack(alignment: .leading, spacing: 16) {
-                Text("移除绑定设备")
-                    .font(.system(size: 17, weight: .bold))
-                Text("确定从设备列表中移除「\(dev.displayName)」吗？")
-                    .font(.system(size: 13))
+            VStack(alignment: .leading, spacing: 14) {
+                Text("移除绑定设备").font(.headline)
+                Text("确定从设备列表移除「\(dev.displayName)」吗？")
                     .foregroundStyle(.secondary)
-                    .frame(width: 320, alignment: .leading)
+                    .frame(width: 300, alignment: .leading)
                 HStack {
                     Spacer()
                     Button("取消") { deletingDevice = nil }
-                    BbsLiquidActionButton(title: "确认移除", symbol: "trash", compact: true) {
+                    Button("移除", role: .destructive) {
                         store.invoke("deletePeer", args: ["id": dev.id])
                         store.showToast("已移除设备")
                         deletingDevice = nil
                     }
+                    .buttonStyle(.borderedProminent)
                 }
             }
-            .padding(24)
+            .padding(20)
         }
     }
 }
@@ -1381,8 +999,6 @@ struct BbsDeviceGlassCard: View {
     let onRename: () -> Void
     let onDelete: () -> Void
 
-    @State private var hovering = false
-
     private var platformIcon: String {
         let p = dev.platform.lowercased()
         if p.contains("mac") || p.contains("darwin") { return "laptopcomputer" }
@@ -1392,62 +1008,54 @@ struct BbsDeviceGlassCard: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
+        VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 12) {
-                ZStack {
-                    RoundedRectangle(cornerRadius: 14, style: .continuous)
-                        .fill(
-                            dev.online
-                                ? LinearGradient(
-                                    colors: [Color.cyan.opacity(0.25), Color.indigo.opacity(0.22)],
-                                    startPoint: .topLeading,
-                                    endPoint: .bottomTrailing
-                                )
-                                : LinearGradient(
-                                    colors: [Color.gray.opacity(0.16), Color.gray.opacity(0.10)],
-                                    startPoint: .topLeading,
-                                    endPoint: .bottomTrailing
-                                )
-                        )
-                        .frame(width: 46, height: 46)
-
-                    Image(systemName: platformIcon)
-                        .font(.system(size: 20, weight: .semibold))
-                        .foregroundStyle(dev.online ? Color.cyan : Color.secondary)
-                }
+                Image(systemName: platformIcon)
+                    .font(.title2)
+                    .foregroundStyle(dev.online ? Color.accentColor : Color.secondary)
+                    .frame(width: 40, height: 40)
+                    .background(
+                        (dev.online ? Color.accentColor : Color.secondary).opacity(0.12),
+                        in: RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    )
 
                 VStack(alignment: .leading, spacing: 3) {
                     HStack(spacing: 6) {
                         Text(dev.displayName)
-                            .font(.system(size: 15, weight: .bold))
+                            .font(.headline)
                             .lineLimit(1)
-
                         if dev.isSelf {
                             Text("本机")
-                                .font(.system(size: 10, weight: .bold))
+                                .font(.caption2.weight(.semibold))
                                 .padding(.horizontal, 6)
-                                .padding(.vertical, 1.5)
-                                .foregroundStyle(.cyan)
-                                .background(Capsule().fill(Color.cyan.opacity(0.16)))
+                                .padding(.vertical, 1)
+                                .background(Color.accentColor.opacity(0.14), in: Capsule())
+                                .foregroundStyle(.tint)
                         }
                     }
 
                     HStack(spacing: 6) {
                         Circle()
-                            .fill(dev.online ? Color.green : Color.gray.opacity(0.6))
+                            .fill(dev.online ? Color.green : Color.gray.opacity(0.5))
                             .frame(width: 7, height: 7)
-                        Text(dev.online ? "在线 · 支持 P2P" : "离线")
-                            .font(.system(size: 11.5, weight: .medium))
+                        Text(dev.online ? "在线" : "离线")
+                            .font(.caption)
                             .foregroundStyle(dev.online ? Color.green : Color.secondary)
                         Text("·")
                             .foregroundStyle(.secondary)
                         Text(dev.platform.isEmpty ? "Desktop" : dev.platform)
-                            .font(.system(size: 11.5))
+                            .font(.caption)
                             .foregroundStyle(.secondary)
+                        Text("·")
+                            .foregroundStyle(.secondary)
+                        Text(dev.formattedId.isEmpty ? dev.id : dev.formattedId)
+                            .font(.caption.monospaced())
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
                     }
                 }
 
-                Spacer()
+                Spacer(minLength: 4)
 
                 Menu {
                     if !dev.isSelf {
@@ -1466,54 +1074,176 @@ struct BbsDeviceGlassCard: View {
                     }
                 } label: {
                     Image(systemName: "ellipsis.circle")
-                        .font(.system(size: 16))
+                        .font(.title3)
                         .foregroundStyle(.secondary)
-                        .padding(4)
                 }
                 .menuStyle(.borderlessButton)
-                .frame(width: 28)
+                .fixedSize()
             }
 
-            Divider().opacity(0.22)
+            Divider()
 
             HStack(spacing: 8) {
-                Text("ID: \(dev.formattedId.isEmpty ? dev.id : dev.formattedId)")
-                    .font(.system(size: 11.5, weight: .semibold, design: .monospaced))
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-
-                Spacer()
-
                 if !dev.isSelf {
-                    BbsLiquidActionButton(title: "端口映射", symbol: "point.3.connected.trianglepath.dotted", prominent: false, compact: true, action: onPortForward)
-                    BbsLiquidActionButton(title: "传文件", symbol: "folder", prominent: false, compact: true, action: onTransfer)
-                    BbsLiquidActionButton(title: "一键远程", symbol: "play.fill", prominent: true, compact: true, action: onConnect)
+                    Button(action: onTransfer) {
+                        Label("传文件", systemImage: "folder")
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                    .fixedSize()
+
+                    Button(action: onPortForward) {
+                        Label("端口映射", systemImage: "network")
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                    .fixedSize()
+
+                    Spacer(minLength: 4)
+
+                    Button(action: onConnect) {
+                        Label("一键远程", systemImage: "play.fill")
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.regular)
+                    .fixedSize()
                 } else {
-                    Text("当前主控端 · 多通道已解锁")
-                        .font(.system(size: 11.5, weight: .medium))
+                    Text("当前主控端 · 多通道并发已解锁")
+                        .font(.caption)
                         .foregroundStyle(.secondary)
+                    Spacer()
                 }
             }
         }
-        .padding(16)
-        .liquidGlass(radius: 20)
-        .scaleEffect(hovering ? 1.01 : 1.0)
-        .animation(.spring(response: 0.25, dampingFraction: 0.8), value: hovering)
-        .onHover { hovering = $0 }
+        .padding(14)
+        .appleSurfaceCard(radius: 16)
     }
 }
 
-// MARK: - Page 2: Key Mapping Center (540+ Mac & Windows Mappings)
+// MARK: - Page 2: Multi-Screen, Virtual/Wireless/Super Display & Privacy (Native Grouped Form)
+
+struct BbsMultiScreenPrivacyPage: View {
+    @ObservedObject var store: BbsNativeStore
+
+    private var remotePeers: [BbsDeviceItem] {
+        store.devices.filter { !$0.isSelf }
+    }
+
+    var body: some View {
+        Form {
+            Section {
+                Toggle(isOn: Binding(
+                    get: { store.multiScreenAllWindows },
+                    set: { val in
+                        store.multiScreenAllWindows = val
+                        store.invoke("updateSetting", args: ["key": "multiScreenAllWindows", "value": val])
+                        store.showToast(val ? "已开启多屏控多屏" : "已切换为单窗口多屏切换")
+                    }
+                )) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("多屏控多屏（所有远端屏幕独立窗口同开）")
+                        Text("连接多显示器电脑时，自动将远端多块屏幕映射到本机多显示器上")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
+                LabeledContent("虚拟屏与超级屏") {
+                    Text("远控顶部「显示 → 尊享旗舰画质 · 中转 · 超级屏」一键挂载虚拟屏或切 4K / 21:9 带鱼屏")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.trailing)
+                }
+            } header: {
+                Text("多屏控多屏 · 虚拟屏 · 超级屏")
+            }
+
+            Section {
+                Picker("隐私防窥呈现方式", selection: Binding(
+                    get: { store.privacyStyle },
+                    set: { val in
+                        store.privacyStyle = val
+                        store.invoke("updateSetting", args: ["key": "privacyStyle", "value": val])
+                        store.showToast(val == "screensaver" ? "已切换为自定义隐私屏保模式" : "已切换为纯黑屏防窥模式")
+                    }
+                )) {
+                    Text("黑屏隐私屏（物理显示器纯黑防窥并锁本地键鼠）").tag("blackout")
+                    Text("自定义隐私屏保（物理屏显示专属锁屏，主控端正常看桌面）").tag("screensaver")
+                }
+                .pickerStyle(.radioGroup)
+
+                if store.privacyStyle == "screensaver" {
+                    HStack(spacing: 8) {
+                        TextField("自定义隐私屏保提示文案", text: $store.privacyText)
+                            .textFieldStyle(.roundedBorder)
+                        Button("保存文案") {
+                            store.invoke("updateSetting", args: ["key": "privacyText", "value": store.privacyText])
+                            store.showToast("已保存自定义隐私屏保文案")
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .controlSize(.small)
+                    }
+                }
+            } header: {
+                Text("黑屏隐私屏与自定义隐私屏保")
+            } footer: {
+                Text("在远控顶部菜单点击「显示 → 隐私模式」即可实时触发，采用 macOS NSWindowSharingNone 原生防录屏层，主控端不受遮挡。")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            Section("无线副屏 · 手动切中转 · 端口映射快启") {
+                if remotePeers.isEmpty {
+                    Text("在另一台电脑登录同一账号后，即可在此一键以无线副屏或端口映射方式连接")
+                        .foregroundStyle(.secondary)
+                } else {
+                    ForEach(remotePeers) { dev in
+                        HStack(spacing: 10) {
+                            Circle()
+                                .fill(dev.online ? Color.green : Color.gray.opacity(0.5))
+                                .frame(width: 8, height: 8)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(dev.displayName).font(.body.weight(.medium))
+                                Text("\(dev.platform.isEmpty ? "Desktop" : dev.platform) · \(dev.formattedId)")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                            Button("切中转") {
+                                store.connectPeer(dev, forceRelay: true)
+                            }
+                            .buttonStyle(.bordered)
+                            .controlSize(.small)
+
+                            Button("端口映射") {
+                                store.connectPeer(dev, portForward: true)
+                            }
+                            .buttonStyle(.bordered)
+                            .controlSize(.small)
+
+                            Button("无线副屏") {
+                                store.connectPeer(dev, wirelessExt: true)
+                            }
+                            .buttonStyle(.borderedProminent)
+                            .controlSize(.small)
+                        }
+                    }
+                }
+            }
+        }
+        .formStyle(.grouped)
+    }
+}
+
+// MARK: - Page 3: Key Mapping Center (544+ Mac & Windows Mappings)
 
 struct BbsKeyMappingPage: View {
     @ObservedObject var store: BbsNativeStore
-    @State private var searchQuery: String = ""
     @State private var categoryFilter: String = "all"
     @State private var peerFilter: String = "all"
-    @State private var showingAddModal: Bool = false
 
     private var filteredRules: [BbsKeyRuleItem] {
-        let q = searchQuery.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let q = store.keySearchText.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         return store.keyRules.filter { r in
             if categoryFilter != "all" && r.category != categoryFilter { return false }
             if peerFilter == "windows" && r.peer != "windows" && r.peer != "all" { return false }
@@ -1528,237 +1258,131 @@ struct BbsKeyMappingPage: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            // Header
-            HStack {
-                VStack(alignment: .leading, spacing: 3) {
-                    Text("按键映射中心")
-                        .font(.system(size: 24, weight: .bold, design: .rounded))
-                    Text("内置 \(store.keyTotalCount) 项 Mac ⇄ Windows 系统、办公、开发设计、3D 小键盘与电竞游戏键位，实时无感转换")
-                        .font(.system(size: 12, weight: .medium))
-                        .foregroundStyle(.secondary)
-                }
-                Spacer()
-                BbsLiquidActionButton(title: "新增自定义映射", symbol: "plus", prominent: true, compact: false) {
-                    showingAddModal = true
-                }
-            }
-            .padding(.top, 6)
-
-            // Master Engine Switch Card
-            HStack(spacing: 14) {
-                ZStack {
-                    RoundedRectangle(cornerRadius: 12, style: .continuous)
-                        .fill(
-                            LinearGradient(
-                                colors: [Color.cyan, Color.indigo],
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
-                            )
-                        )
-                        .frame(width: 40, height: 40)
-                    Image(systemName: "keyboard.fill")
-                        .foregroundStyle(.white)
-                        .font(.system(size: 17, weight: .semibold))
-                }
-
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("全局按键映射引擎 · 共 \(store.keyTotalCount) 项规则（当前已启用 \(store.keyEnabledCount) 项）")
-                        .font(.system(size: 14, weight: .bold))
-                    Text("自动识别远端 Windows / macOS 系统，支持单键长按蓄力（FPS/原神/MMO）与组合键防卡键保护")
-                        .font(.system(size: 11.5))
-                        .foregroundStyle(.secondary)
-                }
-
-                Spacer()
-
-                Toggle("", isOn: Binding(
-                    get: { store.keyMasterEnabled },
-                    set: { val in
-                        store.keyMasterEnabled = val
-                        store.invoke("setKeyMasterEnabled", args: ["enabled": val])
-                        store.showToast(val ? "已启用全局按键映射引擎" : "已暂停全局按键映射")
-                    }
-                ))
-                .toggleStyle(.switch)
-                .labelsHidden()
-            }
-            .padding(14)
-            .liquidGlass(radius: 18)
-
-            // Scene Presets Strip
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 8) {
-                    ForEach(store.keyPresets) { preset in
-                        let active = store.activeKeyPreset == preset.id
-                        Button {
-                            store.activeKeyPreset = preset.id
-                            store.invoke("applyKeyPreset", args: ["presetId": preset.id])
-                            store.showToast("已切换方案：\(preset.name)")
-                        } label: {
-                            Text(preset.name)
-                                .font(.system(size: 12, weight: active ? .bold : .medium))
-                                .padding(.horizontal, 13)
-                                .padding(.vertical, 7)
-                                .foregroundStyle(active ? Color.white : Color.primary)
-                                .background(
-                                    Group {
-                                        if active {
-                                            Capsule(style: .continuous)
-                                                .fill(
-                                                    LinearGradient(
-                                                        colors: [Color(red: 0.06, green: 0.62, blue: 0.98), Color.indigo],
-                                                        startPoint: .leading,
-                                                        endPoint: .trailing
-                                                    )
-                                                )
-                                        } else {
-                                            Capsule(style: .continuous)
-                                                .fill(.thinMaterial)
-                                                .overlay(Capsule().strokeBorder(Color.white.opacity(0.25), lineWidth: 1))
-                                        }
-                                    }
-                                )
+        VStack(spacing: 0) {
+            // Top Controls Bar (100% responsive, zero horizontal overflow)
+            VStack(spacing: 10) {
+                HStack(spacing: 12) {
+                    Toggle(isOn: Binding(
+                        get: { store.keyMasterEnabled },
+                        set: { val in
+                            store.keyMasterEnabled = val
+                            store.invoke("setKeyMasterEnabled", args: ["enabled": val])
+                            store.showToast(val ? "已启用全局按键映射引擎" : "已暂停按键映射")
                         }
-                        .buttonStyle(.plain)
-                        .help(preset.subtitle)
+                    )) {
+                        Text("全局按键映射引擎（内置 \(store.keyTotalCount) 项 · 已启用 \(store.keyEnabledCount) 项）")
+                            .font(.callout.weight(.semibold))
                     }
-                }
-            }
+                    .toggleStyle(.switch)
 
-            // Search + Category + OS Filter Bar
-            HStack(spacing: 8) {
-                HStack(spacing: 7) {
-                    Image(systemName: "magnifyingglass")
-                        .foregroundStyle(.secondary)
-                        .font(.system(size: 12.5))
-                    TextField("搜索 540+ 快捷键（如：复制、截图、VS Code、PS、Blender、原神、FPS、LOL）...", text: $searchQuery)
-                        .textFieldStyle(.plain)
-                        .font(.system(size: 12.5))
-                    if !searchQuery.isEmpty {
-                        Button {
-                            searchQuery = ""
-                        } label: {
-                            Image(systemName: "xmark.circle.fill")
-                                .foregroundStyle(.secondary)
+                    Spacer()
+
+                    Picker("场景预设", selection: Binding(
+                        get: { store.activeKeyPreset },
+                        set: { val in
+                            store.activeKeyPreset = val
+                            store.invoke("applyKeyPreset", args: ["presetId": val])
+                            if let p = store.keyPresets.first(where: { $0.id == val }) {
+                                store.showToast("已切换方案：\(p.name)")
+                            }
                         }
-                        .buttonStyle(.plain)
+                    )) {
+                        ForEach(store.keyPresets) { p in
+                            Text(p.name).tag(p.id)
+                        }
                     }
-                }
-                .padding(.horizontal, 12)
-                .padding(.vertical, 8)
-                .liquidGlass(radius: 14)
-
-                ForEach([
-                    ("all", "全部"),
-                    ("system", "系统互转"),
-                    ("office", "办公/浏览器"),
-                    ("creative", "开发/设计/3D"),
-                    ("gaming", "电竞/游戏"),
-                    ("custom", "自定义")
-                ], id: \.0) { catId, label in
-                    let sel = categoryFilter == catId
-                    Button {
-                        categoryFilter = catId
-                    } label: {
-                        Text(label)
-                            .font(.system(size: 11.5, weight: sel ? .bold : .medium))
-                            .padding(.horizontal, 10)
-                            .padding(.vertical, 6.5)
-                            .foregroundStyle(sel ? Color.cyan : Color.primary.opacity(0.8))
-                            .background(
-                                Capsule().fill(sel ? Color.cyan.opacity(0.18) : Color.primary.opacity(0.05))
-                            )
-                    }
-                    .buttonStyle(.plain)
+                    .frame(maxWidth: 230)
                 }
 
-                Picker("", selection: $peerFilter) {
-                    Text("全部系统").tag("all")
-                    Text("远端 Win").tag("windows")
-                    Text("远端 Mac").tag("macos")
-                    Text("仅已启用").tag("enabled")
+                HStack(spacing: 10) {
+                    Picker("分类", selection: $categoryFilter) {
+                        Text("全部分类").tag("all")
+                        Text("系统互转").tag("system")
+                        Text("办公 / 浏览器").tag("office")
+                        Text("开发 / 设计 / 3D").tag("creative")
+                        Text("电竞 / 游戏").tag("gaming")
+                        Text("我的自定义").tag("custom")
+                    }
+                    .pickerStyle(.segmented)
+                    .labelsHidden()
+
+                    Picker("远端系统", selection: $peerFilter) {
+                        Text("全部系统").tag("all")
+                        Text("远端 Win").tag("windows")
+                        Text("远端 Mac").tag("macos")
+                        Text("仅已启用").tag("enabled")
+                    }
+                    .labelsHidden()
+                    .frame(width: 112)
                 }
-                .labelsHidden()
-                .frame(width: 105)
             }
+            .padding(.horizontal, 18)
+            .padding(.vertical, 12)
 
-            // Virtualized 540+ Key Rules List
+            Divider()
+
             ScrollView {
                 if filteredRules.isEmpty {
-                    VStack(spacing: 10) {
+                    VStack(spacing: 8) {
                         Image(systemName: "keyboard")
-                            .font(.system(size: 34))
+                            .font(.largeTitle)
                             .foregroundStyle(.secondary)
-                        Text("没有找到匹配的按键映射")
-                            .font(.system(size: 14, weight: .semibold))
+                        Text("未找到匹配的按键映射")
                             .foregroundStyle(.secondary)
                     }
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 60)
-                    .liquidGlass(radius: 18)
                 } else {
                     LazyVStack(spacing: 8) {
                         ForEach(filteredRules) { rule in
-                            HStack(spacing: 12) {
-                                VStack(alignment: .leading, spacing: 3) {
-                                    HStack(spacing: 7) {
+                            HStack(spacing: 10) {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    HStack(spacing: 6) {
                                         Text(rule.direction)
-                                            .font(.system(size: 10, weight: .bold))
-                                            .padding(.horizontal, 7)
+                                            .font(.caption2.weight(.semibold))
+                                            .padding(.horizontal, 6)
                                             .padding(.vertical, 2)
-                                            .foregroundStyle(.cyan)
-                                            .background(Capsule().fill(Color.cyan.opacity(0.16)))
-
+                                            .background(Color.accentColor.opacity(0.14), in: Capsule())
+                                            .foregroundStyle(.tint)
                                         Text(rule.name)
-                                            .font(.system(size: 13.5, weight: .semibold))
+                                            .font(.callout.weight(.medium))
                                             .lineLimit(1)
                                     }
                                     Text("\(rule.subGroup) · \(rule.desc)")
-                                        .font(.system(size: 11.5))
+                                        .font(.caption)
                                         .foregroundStyle(.secondary)
                                         .lineLimit(1)
                                 }
 
-                                Spacer()
+                                Spacer(minLength: 8)
 
                                 Text(rule.srcDisplay)
-                                    .font(.system(size: 11.5, weight: .bold, design: .monospaced))
-                                    .padding(.horizontal, 10)
-                                    .padding(.vertical, 5)
-                                    .background(
-                                        RoundedRectangle(cornerRadius: 8, style: .continuous)
-                                            .fill(Color.primary.opacity(0.07))
-                                    )
+                                    .font(.caption.monospaced().weight(.semibold))
+                                    .padding(.horizontal, 8)
+                                    .padding(.vertical, 4)
+                                    .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+                                    .fixedSize()
 
                                 Image(systemName: "arrow.right")
-                                    .font(.system(size: 12, weight: .bold))
-                                    .foregroundStyle(.cyan)
+                                    .font(.caption2.bold())
+                                    .foregroundStyle(.secondary)
 
                                 Text(rule.dstDisplay)
-                                    .font(.system(size: 11.5, weight: .bold, design: .monospaced))
-                                    .foregroundStyle(.cyan)
-                                    .padding(.horizontal, 10)
-                                    .padding(.vertical, 5)
-                                    .background(
-                                        RoundedRectangle(cornerRadius: 8, style: .continuous)
-                                            .fill(Color.cyan.opacity(0.14))
-                                            .overlay(
-                                                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                                                    .strokeBorder(Color.cyan.opacity(0.35), lineWidth: 1)
-                                            )
-                                    )
+                                    .font(.caption.monospaced().weight(.semibold))
+                                    .foregroundStyle(.tint)
+                                    .padding(.horizontal, 8)
+                                    .padding(.vertical, 4)
+                                    .background(Color.accentColor.opacity(0.12), in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+                                    .fixedSize()
 
                                 if rule.isCustom {
-                                    Button {
+                                    Button(role: .destructive) {
                                         store.invoke("deleteCustomKeyRule", args: ["id": rule.id])
                                         store.showToast("已删除自定义映射")
                                     } label: {
                                         Image(systemName: "trash")
-                                            .foregroundStyle(.red)
-                                            .padding(4)
                                     }
-                                    .buttonStyle(.plain)
+                                    .buttonStyle(.borderless)
                                 }
 
                                 Toggle("", isOn: Binding(
@@ -1769,18 +1393,18 @@ struct BbsKeyMappingPage: View {
                                 .controlSize(.small)
                                 .labelsHidden()
                             }
-                            .padding(.horizontal, 16)
+                            .padding(.horizontal, 14)
                             .padding(.vertical, 10)
-                            .liquidGlass(radius: 15, tint: rule.enabled ? Color.cyan.opacity(0.03) : nil)
+                            .appleSurfaceCard(radius: 12)
                         }
                     }
-                    .padding(.vertical, 2)
+                    .padding(16)
                 }
             }
-            .scrollContentBackground(.hidden)
         }
-        .sheet(isPresented: $showingAddModal) {
-            BbsAddCustomKeyRuleSheet(store: store, isPresented: $showingAddModal)
+        .searchable(text: $store.keySearchText, placement: .toolbar, prompt: "搜索 540+ 快捷键（复制、截图、VS Code、PS、Blender、原神、FPS、LOL...）")
+        .sheet(isPresented: $store.showingAddKeyModal) {
+            BbsAddCustomKeyRuleSheet(store: store, isPresented: $store.showingAddKeyModal)
         }
     }
 }
@@ -1810,62 +1434,50 @@ struct BbsAddCustomKeyRuleSheet: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            Text("新增自定义按键映射")
-                .font(.system(size: 18, weight: .bold))
+        VStack(alignment: .leading, spacing: 14) {
+            Text("新增自定义按键映射").font(.headline)
 
-            TextField("规则名称（例如：一键连招 / Photoshop 快速导出）", text: $name)
-                .textFieldStyle(.roundedBorder)
-
-            HStack {
-                Text("生效远端系统：")
-                    .font(.system(size: 13, weight: .semibold))
-                Picker("", selection: $peer) {
-                    Text("Mac & Windows 通用").tag("all")
+            Form {
+                TextField("规则名称", text: $name)
+                Picker("远端系统", selection: $peer) {
+                    Text("Mac & Win 通用").tag("all")
                     Text("仅远端 Windows").tag("windows")
                     Text("仅远端 macOS").tag("macos")
                 }
-                .pickerStyle(.segmented)
-            }
-
-            Divider()
-
-            VStack(alignment: .leading, spacing: 8) {
-                Text("当本机按下（触发键位）：")
-                    .font(.system(size: 13, weight: .semibold))
-                HStack(spacing: 14) {
-                    Toggle("⌘ Cmd", isOn: $srcMeta)
-                    Toggle("⌃ Ctrl", isOn: $srcCtrl)
-                    Toggle("⌥ Option", isOn: $srcAlt)
-                    Toggle("⇧ Shift", isOn: $srcShift)
+                Section("触发键位（本机按下）") {
+                    HStack(spacing: 12) {
+                        Toggle("⌘ Cmd", isOn: $srcMeta)
+                        Toggle("⌃ Ctrl", isOn: $srcCtrl)
+                        Toggle("⌥ Opt", isOn: $srcAlt)
+                        Toggle("⇧ Shift", isOn: $srcShift)
+                    }
+                    Picker("主键", selection: $srcKey) {
+                        ForEach(sourceKeyChoices) { item in
+                            Text(item.label).tag(item.code)
+                        }
+                    }
                 }
-                Picker("本机主键", selection: $srcKey) {
-                    ForEach(sourceKeyChoices) { item in
-                        Text(item.label).tag(item.code)
+                Section("目标键位（发送至远端）") {
+                    HStack(spacing: 12) {
+                        Toggle("Ctrl", isOn: $dstCtrl)
+                        Toggle("Win / Cmd", isOn: $dstMeta)
+                        Toggle("Alt / Opt", isOn: $dstAlt)
+                        Toggle("Shift", isOn: $dstShift)
+                    }
+                    Picker("目标键", selection: $dstKey) {
+                        ForEach(store.keyOptions) { item in
+                            Text(item.label).tag(item.code)
+                        }
                     }
                 }
             }
-
-            VStack(alignment: .leading, spacing: 8) {
-                Text("发送至远端电脑（目标键位）：")
-                    .font(.system(size: 13, weight: .semibold))
-                HStack(spacing: 14) {
-                    Toggle("Ctrl", isOn: $dstCtrl)
-                    Toggle("Win / ⌘ Cmd", isOn: $dstMeta)
-                    Toggle("Alt / ⌥ Opt", isOn: $dstAlt)
-                    Toggle("Shift", isOn: $dstShift)
-                }
-                Picker("远端目标按键", selection: $dstKey) {
-                    ForEach(store.keyOptions) { item in
-                        Text(item.label).tag(item.code)
-                    }
-                }
-            }
+            .formStyle(.grouped)
+            .frame(width: 460, height: 340)
 
             HStack {
                 Spacer()
                 Button("取消") { isPresented = false }
-                BbsLiquidActionButton(title: "保存并立即启用", symbol: "checkmark.circle.fill", compact: true) {
+                Button("保存并启用") {
                     store.invoke("addCustomKeyRule", args: [
                         "name": name.isEmpty ? "自定义按键映射" : name,
                         "peer": peer,
@@ -1883,326 +1495,240 @@ struct BbsAddCustomKeyRuleSheet: View {
                     store.showToast("已添加自定义按键映射并实时生效")
                     isPresented = false
                 }
+                .buttonStyle(.borderedProminent)
             }
         }
-        .padding(24)
-        .frame(width: 480)
+        .padding(18)
     }
 }
 
-// MARK: - Page 3: macOS Permissions & TCC Repair
+// MARK: - Page 4: Permissions (Native macOS System Settings Grouped Form)
 
 struct BbsPermissionsPage: View {
     @ObservedObject var store: BbsNativeStore
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 14) {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("本机被控系统权限")
-                        .font(.system(size: 24, weight: .bold, design: .rounded))
-                    Text("开启以下 macOS 系统授权后，其他设备即可高清流畅观看并控制本台 Mac")
-                        .font(.system(size: 12.5))
-                        .foregroundStyle(.secondary)
-                }
-                .padding(.top, 6)
-
+        Form {
+            Section("必需被控权限") {
                 permRow(
-                    title: "屏幕录制与系统音频权限 (Screen Recording)",
-                    desc: "必需权限：允许本机向您的其他设备传输 400FPS 高清桌面画面",
-                    symbol: "display",
+                    title: "屏幕录制与系统音频",
+                    desc: "允许其他设备观看本机 4K 400FPS 桌面画面",
                     granted: store.canScreenRecord,
-                    actionTitle: "去系统设置开启"
-                ) {
-                    store.invoke("openPerm", args: ["kind": "screen"])
-                }
+                    actionTitle: "去开启"
+                ) { store.invoke("openPerm", args: ["kind": "screen"]) }
 
                 permRow(
-                    title: "辅助功能控制权限 (Accessibility)",
-                    desc: "必需权限：允许远端控制本机的鼠标点击、滚轮与键盘输入（含操控本机 BBS-Remote 窗口）",
-                    symbol: "cursorarrow.click.2",
+                    title: "辅助功能控制",
+                    desc: "允许远端控制本机鼠标键盘（含操控本机 BBS-Remote 窗口）",
                     granted: store.canAccessibility,
-                    actionTitle: "去系统设置开启"
-                ) {
-                    store.invoke("openPerm", args: ["kind": "accessibility"])
-                }
+                    actionTitle: "去开启"
+                ) { store.invoke("openPerm", args: ["kind": "accessibility"]) }
+            }
 
+            Section("增强体验权限") {
                 permRow(
-                    title: "输入监控权限 (Input Monitoring)",
-                    desc: "推荐开启：启用底层全局热键与游戏级低延迟按键映射抓取",
-                    symbol: "keyboard.badge.eye",
+                    title: "输入监控 (Input Monitoring)",
+                    desc: "启用底层低延迟游戏级按键映射抓取",
                     granted: store.canInputMonitor,
-                    actionTitle: "去系统设置开启"
-                ) {
-                    store.invoke("openPerm", args: ["kind": "input"])
-                }
+                    actionTitle: "去开启"
+                ) { store.invoke("openPerm", args: ["kind": "input"]) }
 
                 permRow(
-                    title: "后台常驻无人值守服务 (LaunchDaemon)",
-                    desc: "推荐安装：支持开机锁屏界面自动在线，随时随地一键唤醒远控",
-                    symbol: "bolt.shield.fill",
+                    title: "后台常驻无人值守服务",
+                    desc: "支持锁屏界面自动在线与随时唤醒连接",
                     granted: store.daemonInstalled,
-                    actionTitle: "一键安装服务"
-                ) {
-                    store.invoke("openPerm", args: ["kind": "daemon"])
-                }
+                    actionTitle: "一键安装"
+                ) { store.invoke("openPerm", args: ["kind": "daemon"]) }
+            }
 
-                // TCC Self-Heal Card
-                HStack(spacing: 14) {
-                    Image(systemName: "wrench.and.screwdriver.fill")
-                        .font(.system(size: 22))
-                        .foregroundStyle(.cyan)
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text("覆盖升级后提示已开启权限但仍等待画面？")
-                            .font(.system(size: 14, weight: .bold))
-                        Text("macOS 更新新版客户端后可能保留旧签名缓存，点击右侧一键清理重授并重启即可立即恢复")
-                            .font(.system(size: 12))
+            Section("权限自愈与重启") {
+                HStack {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("覆盖升级后卡在「等待画面传输」？")
+                            .font(.callout.weight(.medium))
+                        Text("一键清理 macOS 旧版签名权限缓存并重新拉起系统授权弹窗")
+                            .font(.caption)
                             .foregroundStyle(.secondary)
                     }
                     Spacer()
-                    BbsLiquidActionButton(title: "重置修复权限识别", symbol: "arrow.triangle.2.circlepath", prominent: false, compact: true) {
+                    Button("重置权限识别") {
                         store.invoke("repairPerms")
-                        store.showToast("已重置旧版权限缓存，请在系统弹窗中重新勾选")
+                        store.showToast("已重置权限缓存，请在系统窗口中重新开启")
                     }
-                    BbsLiquidActionButton(title: "立即重启客户端", symbol: "power", prominent: true, compact: true) {
+                    .buttonStyle(.bordered)
+
+                    Button("重启客户端") {
                         store.invoke("relaunchApp")
                     }
+                    .buttonStyle(.borderedProminent)
                 }
-                .padding(18)
-                .liquidGlass(radius: 20, tint: Color.cyan.opacity(0.06))
             }
-            .padding(.bottom, 12)
         }
-        .scrollContentBackground(.hidden)
+        .formStyle(.grouped)
     }
 
-    private func permRow(
-        title: String,
-        desc: String,
-        symbol: String,
-        granted: Bool,
-        actionTitle: String,
-        action: @escaping () -> Void
-    ) -> some View {
-        HStack(spacing: 14) {
-            ZStack {
-                RoundedRectangle(cornerRadius: 13, style: .continuous)
-                    .fill((granted ? Color.green : Color.orange).opacity(0.16))
-                    .frame(width: 44, height: 44)
-                Image(systemName: symbol)
-                    .font(.system(size: 19, weight: .semibold))
-                    .foregroundStyle(granted ? Color.green : Color.orange)
+    private func permRow(title: String, desc: String, granted: Bool, actionTitle: String, action: @escaping () -> Void) -> some View {
+        HStack(spacing: 12) {
+            Image(systemName: granted ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
+                .foregroundStyle(granted ? .green : .orange)
+                .font(.title3)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title).font(.body.weight(.medium))
+                Text(desc).font(.caption).foregroundStyle(.secondary)
             }
-
-            VStack(alignment: .leading, spacing: 3) {
-                Text(title)
-                    .font(.system(size: 14.5, weight: .bold))
-                Text(desc)
-                    .font(.system(size: 12))
-                    .foregroundStyle(.secondary)
-            }
-
             Spacer()
-
             if granted {
-                HStack(spacing: 5) {
-                    Image(systemName: "checkmark.circle.fill")
-                    Text("已就绪")
-                }
-                .font(.system(size: 12.5, weight: .bold))
-                .foregroundStyle(.green)
-                .padding(.horizontal, 12)
-                .padding(.vertical, 6)
-                .background(Capsule().fill(Color.green.opacity(0.15)))
+                Text("已开启")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.green)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 4)
+                    .background(Color.green.opacity(0.14), in: Capsule())
             } else {
-                BbsLiquidActionButton(title: actionTitle, symbol: "arrow.up.forward.app", prominent: true, compact: true, action: action)
+                Button(actionTitle, action: action)
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.small)
             }
         }
-        .padding(16)
-        .liquidGlass(radius: 18)
     }
 }
 
-// MARK: - Page 4: Settings Center (60~400Hz & Mbps)
+// MARK: - Page 5: Settings Center (Native macOS System Settings Grouped Form)
 
 struct BbsSettingsPage: View {
     @ObservedObject var store: BbsNativeStore
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 14) {
+        Form {
+            Section("画质 · 高刷 · 500Mbps 真码率") {
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 155), spacing: 10)], spacing: 10) {
+                    presetBtn(fps: 144, mbps: 500, title: "4K 原画 · 144Hz", sub: "500Mbps 满血")
+                    presetBtn(fps: 240, mbps: 300, title: "电竞极速 · 240Hz", sub: "300Mbps 低延迟")
+                    presetBtn(fps: 400, mbps: 500, title: "极限超频 · 400Hz", sub: "500Mbps 解锁")
+                    presetBtn(fps: 60, mbps: 30, title: "均衡省流 · 60Hz", sub: "30Mbps 流畅")
+                }
+                .padding(.vertical, 4)
+
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("设置中心")
-                        .font(.system(size: 24, weight: .bold, design: .rounded))
-                    Text("自定义 400FPS 超高刷画质、硬件编解码器、P2P 直连策略与液态玻璃外观")
-                        .font(.system(size: 12.5))
-                        .foregroundStyle(.secondary)
-                }
-                .padding(.top, 6)
-
-                // High Refresh Rate & 500Mbps Bitrate Presets
-                VStack(alignment: .leading, spacing: 12) {
-                    Text("4K 原画 · 高刷 · 500Mbps 满血预设")
-                        .font(.system(size: 14.5, weight: .bold))
-
-                    HStack(spacing: 10) {
-                        presetCard(mode: "custom", fps: 144, mbps: 500, title: "4K 原画 · 144Hz", desc: "500Mbps 满血原画")
-                        presetCard(mode: "custom", fps: 240, mbps: 300, title: "电竞极速 · 240Hz", desc: "300Mbps 超低延迟")
-                        presetCard(mode: "custom", fps: 400, mbps: 500, title: "极限超频 · 400Hz", desc: "500Mbps 解锁极限")
-                        presetCard(mode: "custom", fps: 60, mbps: 30, title: "均衡省流 · 60Hz", desc: "30Mbps 移动流畅")
-                    }
-
-                    Divider().opacity(0.25)
-
                     HStack {
-                        Text("目标帧率上限：\(Int(store.customFps)) FPS")
-                            .font(.system(size: 13, weight: .semibold))
-                            .frame(width: 195, alignment: .leading)
-                        Slider(value: $store.customFps, in: 30...400, step: 10) { editing in
-                            if !editing {
-                                store.invoke("updateSetting", args: ["key": "customFps", "value": store.customFps])
-                            }
-                        }
-                        .tint(.cyan)
+                        Text("目标帧率上限")
+                        Spacer()
+                        Text("\(Int(store.customFps)) FPS")
+                            .font(.callout.monospacedDigit().weight(.semibold))
+                            .foregroundStyle(.tint)
                     }
+                    Slider(value: $store.customFps, in: 30...400, step: 10) { editing in
+                        if !editing {
+                            store.invoke("updateSetting", args: ["key": "customFps", "value": store.customFps])
+                        }
+                    }
+                }
 
+                VStack(alignment: .leading, spacing: 4) {
                     HStack {
-                        Text("自定义码率上限：\(Int(store.customQuality)) Mbps")
-                            .font(.system(size: 13, weight: .semibold))
-                            .frame(width: 195, alignment: .leading)
-                        Slider(value: $store.customQuality, in: 5...500, step: 5) { editing in
-                            if !editing {
-                                store.invoke("updateSetting", args: ["key": "customQuality", "value": store.customQuality])
-                            }
+                        Text("自定义码率上限")
+                        Spacer()
+                        Text("\(Int(store.customQuality)) Mbps")
+                            .font(.callout.monospacedDigit().weight(.semibold))
+                            .foregroundStyle(.tint)
+                    }
+                    Slider(value: $store.customQuality, in: 5...500, step: 5) { editing in
+                        if !editing {
+                            store.invoke("updateSetting", args: ["key": "customQuality", "value": store.customQuality])
                         }
-                        .tint(.cyan)
                     }
                 }
-                .padding(18)
-                .liquidGlass(radius: 20)
-
-                // Codec & Appearance
-                HStack(spacing: 14) {
-                    VStack(alignment: .leading, spacing: 10) {
-                        Text("视频硬件编码偏好")
-                            .font(.system(size: 14, weight: .bold))
-                        Picker("", selection: Binding(
-                            get: { store.codecPref },
-                            set: { v in
-                                store.codecPref = v
-                                store.invoke("updateSetting", args: ["key": "codecPref", "value": v])
-                            }
-                        )) {
-                            Text("自动优选").tag("auto")
-                            Text("HEVC (H.265)").tag("h265")
-                            Text("AVC (H.264)").tag("h264")
-                            Text("AV1 超清").tag("av1")
-                        }
-                        .pickerStyle(.segmented)
-                        .labelsHidden()
-                    }
-                    .padding(16)
-                    .frame(maxWidth: .infinity)
-                    .liquidGlass(radius: 18)
-
-                    VStack(alignment: .leading, spacing: 10) {
-                        Text("液态玻璃界面外观")
-                            .font(.system(size: 14, weight: .bold))
-                        Picker("", selection: Binding(
-                            get: { store.themeMode },
-                            set: { v in
-                                store.themeMode = v
-                                store.invoke("updateSetting", args: ["key": "themeMode", "value": v])
-                            }
-                        )) {
-                            Text("跟随系统").tag("system")
-                            Text("液态浅色").tag("light")
-                            Text("深空暗色").tag("dark")
-                        }
-                        .pickerStyle(.segmented)
-                        .labelsHidden()
-                    }
-                    .padding(16)
-                    .frame(maxWidth: .infinity)
-                    .liquidGlass(radius: 18)
-                }
-
-                // Feature Toggles
-                VStack(spacing: 12) {
-                    settingToggle("开启 P2P 打洞直连优先（UDP / IPv6 点对点低延迟通道，多通道不限并发）", key: "directLan", value: $store.directLan)
-                    Divider().opacity(0.2)
-                    settingToggle("手动强制切换至 500Mbps 专线中转通道（适合企业严格防火墙或跨网丢包场景）", key: "forceRelayDefault", value: $store.forceRelayDefault)
-                    Divider().opacity(0.2)
-                    settingToggle("启用 4:4:4 无损真彩模式（专业设计修图与清晰代码文字零色度采样损失）", key: "enableTrueColor", value: $store.enableTrueColor)
-                    Divider().opacity(0.2)
-                    settingToggle("启用 HDR 高动态范围色彩增强（自动协同 4:4:4 真彩与宽色域对比度增强）", key: "enableHdr", value: $store.enableHdr)
-                    Divider().opacity(0.2)
-                    settingToggle("连接后默认展开实时连接通道（P2P/中转）与 Mbps 速率监控面板", key: "showQualityMonitor", value: $store.showQualityMonitor)
-                    Divider().opacity(0.2)
-                    settingToggle("启用 Apple Silicon VideoToolbox 硬件加速编解码", key: "hwCodec", value: $store.hwCodec)
-                    Divider().opacity(0.2)
-                    settingToggle("同步传输远程电脑系统声音", key: "enableSound", value: $store.enableSound)
-                    Divider().opacity(0.2)
-                    settingToggle("开启双向剪贴板与跨端高速文件复制粘贴", key: "enableClipboard", value: $store.enableClipboard)
-                }
-                .padding(18)
-                .liquidGlass(radius: 20)
             }
-            .padding(.bottom, 12)
+
+            Section("色彩 · 编解码 · 外观") {
+                Picker("视频硬件编码器", selection: Binding(
+                    get: { store.codecPref },
+                    set: { v in
+                        store.codecPref = v
+                        store.invoke("updateSetting", args: ["key": "codecPref", "value": v])
+                    }
+                )) {
+                    Text("自动").tag("auto")
+                    Text("H.265").tag("h265")
+                    Text("H.264").tag("h264")
+                    Text("AV1").tag("av1")
+                }
+                .pickerStyle(.segmented)
+
+                Picker("界面外观", selection: Binding(
+                    get: { store.themeMode },
+                    set: { v in
+                        store.themeMode = v
+                        store.applyAppAppearance(v)
+                        store.invoke("updateSetting", args: ["key": "themeMode", "value": v])
+                    }
+                )) {
+                    Text("跟随系统").tag("system")
+                    Text("浅色").tag("light")
+                    Text("深色").tag("dark")
+                }
+                .pickerStyle(.segmented)
+
+                settingToggle("4:4:4 无损真彩模式", sub: "适合设计修图与清晰代码文字显示", key: "enableTrueColor", value: $store.enableTrueColor)
+                settingToggle("HDR 高动态范围色彩增强", sub: "宽色域对比度增强并自动协同 4:4:4 真彩", key: "enableHdr", value: $store.enableHdr)
+                settingToggle("VideoToolbox 硬件加速", sub: "调用 Apple Silicon 媒体引擎超低功耗编解码", key: "hwCodec", value: $store.hwCodec)
+            }
+
+            Section("连接通道与互动") {
+                settingToggle("P2P 打洞直连优先", sub: "UDP / IPv6 点对点直连，多通道不限并发", key: "directLan", value: $store.directLan)
+                settingToggle("全局手动强制 500Mbps 专线中转", sub: "跨运营商抖动或严格防火墙下强制走高速中转", key: "forceRelayDefault", value: $store.forceRelayDefault)
+                settingToggle("默认展开连接通道与 Mbps 速率监控", sub: "会话画面右上角实时显示 P2P/中转 与 Mbps", key: "showQualityMonitor", value: $store.showQualityMonitor)
+                settingToggle("远程系统声音同步", sub: "同步回传远端电脑音频", key: "enableSound", value: $store.enableSound)
+                settingToggle("双向剪贴板与跨端文件复制粘贴", sub: "支持文本、图片与文件跨设备直接复制粘贴", key: "enableClipboard", value: $store.enableClipboard)
+            }
         }
-        .scrollContentBackground(.hidden)
+        .formStyle(.grouped)
     }
 
-    private func presetCard(mode: String, fps: Double, mbps: Double, title: String, desc: String) -> some View {
+    private func presetBtn(fps: Double, mbps: Double, title: String, sub: String) -> some View {
         let active = Int(store.customFps) == Int(fps) && Int(store.customQuality) == Int(mbps)
         return Button {
-            store.imageQuality = mode
+            store.imageQuality = "custom"
             store.customFps = fps
             store.customQuality = mbps
-            store.invoke("setQualityPreset", args: ["mode": mode, "fps": fps, "mbps": mbps])
-            store.showToast("已切换至：\(title) · \(Int(mbps))Mbps")
+            store.invoke("setQualityPreset", args: ["mode": "custom", "fps": fps, "mbps": mbps])
+            store.showToast("已切换至 \(title) · \(Int(mbps))Mbps")
         } label: {
-            VStack(alignment: .leading, spacing: 4) {
-                Text(title)
-                    .font(.system(size: 13, weight: .bold))
-                    .foregroundStyle(active ? Color.cyan : Color.primary)
-                Text(desc)
-                    .font(.system(size: 11))
-                    .foregroundStyle(.secondary)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(title).font(.callout.weight(.semibold))
+                Text(sub).font(.caption).foregroundStyle(active ? Color.accentColor : Color.secondary)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(12)
+            .padding(10)
             .background(
-                RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .fill(active ? Color.cyan.opacity(0.15) : Color.primary.opacity(0.04))
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .fill(active ? Color.accentColor.opacity(0.14) : Color.primary.opacity(0.04))
                     .overlay(
-                        RoundedRectangle(cornerRadius: 14, style: .continuous)
-                            .strokeBorder(active ? Color.cyan.opacity(0.6) : Color.white.opacity(0.18), lineWidth: 1)
+                        RoundedRectangle(cornerRadius: 10, style: .continuous)
+                            .strokeBorder(active ? Color.accentColor : Color.primary.opacity(0.10), lineWidth: 1)
                     )
             )
         }
         .buttonStyle(.plain)
     }
 
-    private func settingToggle(_ label: String, key: String, value: Binding<Bool>) -> some View {
-        HStack {
-            Text(label)
-                .font(.system(size: 13.5, weight: .medium))
-            Spacer()
-            Toggle("", isOn: Binding(
-                get: { value.wrappedValue },
-                set: { newVal in
-                    value.wrappedValue = newVal
-                    store.invoke("updateSetting", args: ["key": key, "value": newVal])
-                }
-            ))
-            .toggleStyle(.switch)
-            .labelsHidden()
+    private func settingToggle(_ title: String, sub: String, key: String, value: Binding<Bool>) -> some View {
+        Toggle(isOn: Binding(
+            get: { value.wrappedValue },
+            set: { newVal in
+                value.wrappedValue = newVal
+                store.invoke("updateSetting", args: ["key": key, "value": newVal])
+            }
+        )) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                Text(sub).font(.caption).foregroundStyle(.secondary)
+            }
         }
     }
 }
 
-// MARK: - Page 5: Temporary Manual Assist & High-Speed Port Forwarding
+// MARK: - Page 6: Manual Assist & TCP Port Forwarding
 
 struct BbsManualAssistPage: View {
     @ObservedObject var store: BbsNativeStore
@@ -2212,323 +1738,88 @@ struct BbsManualAssistPage: View {
     @State private var revealTempCode: Bool = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            VStack(alignment: .leading, spacing: 4) {
-                Text("临时协助与高速端口映射")
-                    .font(.system(size: 24, weight: .bold, design: .rounded))
-                Text("支持输入任意识别码发起远程控制、高速文件传输、TCP 端口映射隧道，并可手动指定专线中转")
-                    .font(.system(size: 12.5))
-                    .foregroundStyle(.secondary)
+        Form {
+            Section("连接外部设备 / TCP 端口映射高速隧道") {
+                TextField("对方 9 位设备识别码", text: $remoteId)
+                SecureField("对方临时验证码（选填）", text: $remotePass)
+                Toggle("本次手动强制走 500Mbps 专线中转通道", isOn: $manualForceRelay)
+
+                HStack(spacing: 10) {
+                    Button {
+                        store.invoke("manualConnect", args: [
+                            "id": remoteId,
+                            "password": remotePass,
+                            "isFileTransfer": false,
+                            "forceRelay": manualForceRelay
+                        ]) { resp in
+                            if (resp["ok"] as? Bool) == false, let err = resp["error"] as? String {
+                                store.showToast(err)
+                            }
+                        }
+                    } label: {
+                        Label("发起远控", systemImage: "play.fill")
+                    }
+                    .buttonStyle(.borderedProminent)
+
+                    Button {
+                        store.invoke("manualConnect", args: [
+                            "id": remoteId,
+                            "password": remotePass,
+                            "isFileTransfer": true,
+                            "forceRelay": manualForceRelay
+                        ])
+                    } label: {
+                        Label("高速传文件", systemImage: "folder")
+                    }
+                    .buttonStyle(.bordered)
+
+                    Button {
+                        store.invoke("manualConnect", args: [
+                            "id": remoteId,
+                            "password": remotePass,
+                            "isTcpTunneling": true,
+                            "forceRelay": manualForceRelay
+                        ])
+                    } label: {
+                        Label("打开 TCP 端口映射", systemImage: "network")
+                    }
+                    .buttonStyle(.bordered)
+                }
             }
-            .padding(.top, 6)
 
-            HStack(alignment: .top, spacing: 16) {
-                // Outgoing Manual Connect Card
-                VStack(alignment: .leading, spacing: 14) {
-                    Label("发起连接 / 端口映射隧道", systemImage: "point.3.connected.trianglepath.dotted")
-                        .font(.system(size: 16, weight: .bold))
-
-                    TextField("输入对方 9 位设备识别码", text: $remoteId)
-                        .textFieldStyle(.plain)
-                        .font(.system(size: 15, weight: .semibold, design: .monospaced))
-                        .padding(12)
-                        .background(
-                            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                .fill(Color.primary.opacity(0.05))
-                                .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(Color.white.opacity(0.24), lineWidth: 1))
-                        )
-
-                    SecureField("输入对方临时密码（选填）", text: $remotePass)
-                        .textFieldStyle(.plain)
-                        .font(.system(size: 14))
-                        .padding(12)
-                        .background(
-                            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                .fill(Color.primary.opacity(0.05))
-                                .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(Color.white.opacity(0.24), lineWidth: 1))
-                        )
-
-                    Toggle("本次手动强制走 500Mbps 专线中转通道（Relay）", isOn: $manualForceRelay)
-                        .toggleStyle(.switch)
-                        .font(.system(size: 12.5, weight: .medium))
-
+            Section("本机临时被控凭证") {
+                LabeledContent("本机识别码") {
+                    Text(store.formattedMyId).font(.body.monospaced().bold())
+                }
+                LabeledContent("临时验证码") {
                     HStack(spacing: 8) {
-                        BbsLiquidActionButton(title: "发起远控", symbol: "play.fill", prominent: true, compact: true) {
-                            store.invoke("manualConnect", args: [
-                                "id": remoteId,
-                                "password": remotePass,
-                                "isFileTransfer": false,
-                                "forceRelay": manualForceRelay
-                            ]) { resp in
-                                if (resp["ok"] as? Bool) == false, let err = resp["error"] as? String {
-                                    store.showToast(err)
-                                }
-                            }
+                        Text(revealTempCode ? store.tempPass : "••••••••")
+                            .font(.body.monospaced().bold())
+                        Button {
+                            revealTempCode.toggle()
+                        } label: {
+                            Image(systemName: revealTempCode ? "eye.slash" : "eye")
                         }
-                        BbsLiquidActionButton(title: "传文件", symbol: "folder", prominent: false, compact: true) {
-                            store.invoke("manualConnect", args: [
-                                "id": remoteId,
-                                "password": remotePass,
-                                "isFileTransfer": true,
-                                "forceRelay": manualForceRelay
-                            ])
+                        .buttonStyle(.borderless)
+                        Button {
+                            store.invoke("refreshTempPass")
+                            store.showToast("已刷新本机临时验证码")
+                        } label: {
+                            Image(systemName: "arrow.clockwise")
                         }
-                        BbsLiquidActionButton(title: "端口映射隧道", symbol: "network", prominent: false, compact: true) {
-                            store.invoke("manualConnect", args: [
-                                "id": remoteId,
-                                "password": remotePass,
-                                "isTcpTunneling": true,
-                                "forceRelay": manualForceRelay
-                            ])
-                        }
+                        .buttonStyle(.borderless)
                     }
                 }
-                .padding(22)
-                .frame(maxWidth: .infinity)
-                .liquidGlass(radius: 22)
-
-                // Local Temporary Code Card
-                VStack(alignment: .leading, spacing: 14) {
-                    Label("本机临时被控凭证", systemImage: "lock.shield.fill")
-                        .font(.system(size: 16, weight: .bold))
-
-                    Text("仅在需要他人临时协助本机时告知对方，自己名下设备无需此密码：")
-                        .font(.system(size: 12))
-                        .foregroundStyle(.secondary)
-
-                    VStack(alignment: .leading, spacing: 8) {
-                        HStack {
-                            Text("本机识别码：")
-                                .foregroundStyle(.secondary)
-                            Text(store.formattedMyId)
-                                .font(.system(size: 16, weight: .bold, design: .monospaced))
-                        }
-
-                        HStack {
-                            Text("临时验证码：")
-                                .foregroundStyle(.secondary)
-                            Text(revealTempCode ? store.tempPass : "••••••••")
-                                .font(.system(size: 16, weight: .bold, design: .monospaced))
-                                .foregroundStyle(.cyan)
-                            Button {
-                                revealTempCode.toggle()
-                            } label: {
-                                Image(systemName: revealTempCode ? "eye.slash" : "eye")
-                                    .foregroundStyle(.secondary)
-                            }
-                            .buttonStyle(.plain)
-
-                            Button {
-                                store.invoke("refreshTempPass")
-                                store.showToast("已刷新本机临时验证码")
-                            } label: {
-                                Image(systemName: "arrow.clockwise")
-                                    .foregroundStyle(.secondary)
-                            }
-                            .buttonStyle(.plain)
-                            .help("刷新临时验证码")
-                        }
-                    }
-                    .padding(14)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(
-                        RoundedRectangle(cornerRadius: 14, style: .continuous)
-                            .fill(Color.primary.opacity(0.05))
-                    )
-
-                    BbsLiquidActionButton(title: "一键复制本机识别码与验证码", symbol: "doc.on.doc", prominent: false) {
-                        let text = "BBS-Remote 识别码: \(store.formattedMyId)\n临时验证码: \(store.tempPass)"
-                        NSPasteboard.general.clearContents()
-                        NSPasteboard.general.setString(text, forType: .string)
-                        store.showToast("已复制本机临时协助信息")
-                    }
+                Button {
+                    let text = "BBS-Remote 识别码: \(store.formattedMyId)\n临时验证码: \(store.tempPass)"
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(text, forType: .string)
+                    store.showToast("已复制本机临时协助信息")
+                } label: {
+                    Label("一键复制本机识别码与验证码", systemImage: "doc.on.doc")
                 }
-                .padding(22)
-                .frame(maxWidth: .infinity)
-                .liquidGlass(radius: 22)
             }
-
-            Spacer()
         }
-    }
-}
-
-// MARK: - Page 6: Multi-Screen, Virtual/Wireless/Super Display & Privacy Screen
-
-struct BbsMultiScreenPrivacyPage: View {
-    @ObservedObject var store: BbsNativeStore
-
-    private var remotePeers: [BbsDeviceItem] {
-        store.devices.filter { !$0.isSelf }
-    }
-
-    var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 14) {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("多屏扩展与隐私防窥中心")
-                        .font(.system(size: 24, weight: .bold, design: .rounded))
-                    Text("全员满血解锁：多屏控多屏 · 无线副屏 · 虚拟屏 · 超级屏 · 黑屏防窥与自定义隐私屏保")
-                        .font(.system(size: 12.5))
-                        .foregroundStyle(.secondary)
-                }
-                .padding(.top, 6)
-
-                // Card 1: Multi-Screen / Virtual Display / Super Screen
-                VStack(alignment: .leading, spacing: 12) {
-                    Label("多屏控多屏 · 虚拟屏 · 超级屏引擎", systemImage: "rectangle.3.group.fill")
-                        .font(.system(size: 15.5, weight: .bold))
-                        .foregroundStyle(.cyan)
-
-                    HStack {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text("多屏控多屏（所有远端显示器独立全屏窗口同开）")
-                                .font(.system(size: 13.5, weight: .semibold))
-                            Text("连接多显示器电脑时，自动将对方的多块屏幕分别映射到您本机的多个物理显示器上")
-                                .font(.system(size: 11.5))
-                                .foregroundStyle(.secondary)
-                        }
-                        Spacer()
-                        Toggle("", isOn: Binding(
-                            get: { store.multiScreenAllWindows },
-                            set: { val in
-                                store.multiScreenAllWindows = val
-                                store.invoke("updateSetting", args: ["key": "multiScreenAllWindows", "value": val])
-                                store.showToast(val ? "已开启多屏控多屏独立窗口映射" : "已切换为单窗口多屏切换")
-                            }
-                        ))
-                        .toggleStyle(.switch)
-                        .labelsHidden()
-                    }
-
-                    Divider().opacity(0.22)
-
-                    HStack(spacing: 10) {
-                        featurePill("多通道并发", "不限通道数 · 同时远控多台电脑", "square.stack.3d.up.fill")
-                        featurePill("虚拟屏扩展", "远控顶部「显示」菜单一键挂载虚拟屏", "display.2")
-                        featurePill("超级屏原画", "一键切 4K / 21:9 带鱼屏 / Retina", "arrow.up.left.and.arrow.down.right")
-                    }
-                }
-                .padding(18)
-                .liquidGlass(radius: 20)
-
-                // Card 2: Privacy Blackout & Custom Privacy Screensaver
-                VStack(alignment: .leading, spacing: 12) {
-                    Label("黑屏隐私屏 · 自定义隐私屏保（本机被控时防偷窥）", systemImage: "eye.slash.circle.fill")
-                        .font(.system(size: 15.5, weight: .bold))
-                        .foregroundStyle(.indigo)
-
-                    Text("当远程会话顶部「显示 → 隐私模式」开启时，本机物理显示器将立即隐藏真实桌面并锁定本地键鼠，而主控端依然正常流畅操控：")
-                        .font(.system(size: 12))
-                        .foregroundStyle(.secondary)
-
-                    Picker("", selection: Binding(
-                        get: { store.privacyStyle },
-                        set: { val in
-                            store.privacyStyle = val
-                            store.invoke("updateSetting", args: ["key": "privacyStyle", "value": val])
-                            store.showToast(val == "screensaver" ? "已切换为自定义隐私屏保模式" : "已切换为纯黑屏防窥模式")
-                        }
-                    )) {
-                        Text("黑屏隐私屏（物理显示器纯黑防窥）").tag("blackout")
-                        Text("自定义隐私屏保（物理屏显示专属维护锁屏，主控端正常看桌面）").tag("screensaver")
-                    }
-                    .pickerStyle(.segmented)
-                    .labelsHidden()
-
-                    if store.privacyStyle == "screensaver" {
-                        HStack(spacing: 10) {
-                            TextField("输入物理显示器上显示的隐私屏保文案...", text: $store.privacyText)
-                                .textFieldStyle(.plain)
-                                .font(.system(size: 13.5))
-                                .padding(.horizontal, 12)
-                                .padding(.vertical, 9)
-                                .background(
-                                    RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                        .fill(Color.primary.opacity(0.05))
-                                        .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(Color.white.opacity(0.24), lineWidth: 1))
-                                )
-
-                            BbsLiquidActionButton(title: "保存屏保文案", symbol: "checkmark", compact: true) {
-                                store.invoke("updateSetting", args: ["key": "privacyText", "value": store.privacyText])
-                                store.showToast("已保存自定义隐私屏保文案")
-                            }
-                        }
-                    }
-                }
-                .padding(18)
-                .liquidGlass(radius: 20)
-
-                // Card 3: Wireless Secondary Screen & High-Speed Port Forward Quick Launcher
-                VStack(alignment: .leading, spacing: 12) {
-                    Label("无线副屏 & 端口映射高速中转快速通道", systemImage: "airplayvideo")
-                        .font(.system(size: 15.5, weight: .bold))
-                        .foregroundStyle(.cyan)
-
-                    if remotePeers.isEmpty {
-                        Text("在另一台 Mac 或 Windows 登录同一账号后，即可在此一键开启无线副屏或高速端口映射隧道")
-                            .font(.system(size: 12.5))
-                            .foregroundStyle(.secondary)
-                    } else {
-                        ForEach(remotePeers) { dev in
-                            HStack(spacing: 12) {
-                                Circle()
-                                    .fill(dev.online ? Color.green : Color.gray.opacity(0.5))
-                                    .frame(width: 8, height: 8)
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text(dev.displayName)
-                                        .font(.system(size: 13.5, weight: .bold))
-                                    Text("\(dev.platform.isEmpty ? "Desktop" : dev.platform) · ID: \(dev.formattedId)")
-                                        .font(.system(size: 11.5))
-                                        .foregroundStyle(.secondary)
-                                }
-                                Spacer()
-                                BbsLiquidActionButton(title: "手动切中转", symbol: "arrow.triangle.branch", prominent: false, compact: true) {
-                                    store.connectPeer(dev, forceRelay: true)
-                                }
-                                BbsLiquidActionButton(title: "端口映射", symbol: "network", prominent: false, compact: true) {
-                                    store.connectPeer(dev, portForward: true)
-                                }
-                                BbsLiquidActionButton(title: "无线副屏", symbol: "display.2", prominent: true, compact: true) {
-                                    store.connectPeer(dev, wirelessExt: true)
-                                }
-                            }
-                            .padding(12)
-                            .background(
-                                RoundedRectangle(cornerRadius: 14, style: .continuous)
-                                    .fill(Color.primary.opacity(0.04))
-                            )
-                        }
-                    }
-                }
-                .padding(18)
-                .liquidGlass(radius: 20)
-            }
-            .padding(.bottom, 12)
-        }
-        .scrollContentBackground(.hidden)
-    }
-
-    private func featurePill(_ title: String, _ desc: String, _ icon: String) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack(spacing: 6) {
-                Image(systemName: icon)
-                    .foregroundStyle(.cyan)
-                    .font(.system(size: 13, weight: .bold))
-                Text(title)
-                    .font(.system(size: 13, weight: .bold))
-            }
-            Text(desc)
-                .font(.system(size: 11))
-                .foregroundStyle(.secondary)
-                .lineLimit(2)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(12)
-        .background(
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .fill(Color.primary.opacity(0.04))
-                .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(Color.white.opacity(0.18), lineWidth: 1))
-        )
+        .formStyle(.grouped)
     }
 }
